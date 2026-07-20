@@ -1,7 +1,7 @@
 # nodruma
 
 **No Drama Drums** — portable C++ tool to chop drum grooves and recreate
-kick / snare / hat one-shots. Early tester build (headless CLI).
+kick / snare / hat one-shots. Experimental, headless.
 
 ## Build
 
@@ -23,7 +23,7 @@ Binary: `./build/nodruma`
 | Feature | Status |
 |---------|--------|
 | Groove chop (`split`) via spectral flux | Good on typical breaks |
-| Classify kick / snare / hat | Heuristic — usually fine, sometimes `unknown` |
+| Classify kick / snare / hat | Improved (onset-aligned sub/LF/HF); duplicates still common |
 | Recreate **snare** from chop | Strong (layer mix) |
 | Recreate **hat** from chop | Decent on short hats |
 | Recreate **kick** from one-shot / mix | Usable; still improving |

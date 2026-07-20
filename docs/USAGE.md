@@ -40,8 +40,10 @@ Primary early-tester workflow:
 | `--no-classify` | off | Skip kick/snare/hat labels |
 | `--prefix` | none | Prefix filenames |
 
-Chopping uses STFT spectral flux (HFC + LF blend), robust median/MAD threshold,
-and spectral classification. See Architecture → Groove split.
+Chopping uses STFT spectral flux (HFC + LF blend) and a robust median/MAD
+threshold. Classification uses an **onset-aligned ~80 ms** spectrum (sub / LF /
+mid / HF / air) with vetoes so strong sub/LF prefers kick over snare. See
+Architecture → Groove split.
 
 ## Single-hit recreate
 
@@ -72,11 +74,14 @@ Optional:
 
 ## Known limits (honest)
 
-- Classification is spectral heuristics — mislabels happen.
+- Classification is much better on kick-vs-snare after onset-aligned scoring,
+  but dense grooves can still mislabel edge cases.
+- Double-triggers / near-duplicate chops are common — dedupe is not done yet
+  (raise `--min-gap` as a temporary workaround).
 - Kick body quality is still improving on mixed sources.
 - Hats on long/bleed-y chops can be thin or odd.
 - `unknown` is not auto-recreated.
 - No GUI / plugin host yet — CLI + C API only.
 
 Feedback that helps: which groove, which hit index, chop vs extracted, and what
-sounds wrong (body / crack / length / bleed).
+sounds wrong (body / crack / length / bleed / wrong label).

@@ -177,31 +177,43 @@ void detect_transients(const float* mono, std::size_t n, double sample_rate,
 
 struct BandFeat {
   float centroid_hz = 0.f;
-  float lf = 0.f;
-  float mid = 0.f;
-  float hf = 0.f;
+  float sub = 0.f;  /// ~30–80 Hz
+  float lf = 0.f;   /// ~40–160 Hz
+  float mid = 0.f;  /// ~200–2000 Hz
+  float hf = 0.f;   /// ~2–12 kHz
+  float air = 0.f;  /// ~6–16 kHz
   float total = 0.f;
 };
 
-BandFeat attack_bands(const float* x, std::size_t n, double sample_rate) {
+/// Attack spectrum from onset (not pre-roll). Single windowed FFT — short STFT
+/// from start_sample was missing kick LF and over-labeling snares.
+BandFeat attack_bands(const float* mono, std::size_t n, std::int64_t onset,
+                      double sample_rate) {
   BandFeat f;
-  if (!x || n < 16) return f;
+  if (!mono || n < 16 || sample_rate <= 0.0) return f;
   const float sr = static_cast<float>(sample_rate);
-  // Lightweight magnitude spectrum via existing STFT (one short frame stack).
+  const std::size_t o =
+      static_cast<std::size_t>(std::clamp<std::int64_t>(onset, 0, static_cast<std::int64_t>(n) - 1));
+  // ~80 ms of post-onset audio (kick body needs more than a click window).
+  const std::size_t want = static_cast<std::size_t>(sr * 0.08f);
+  const std::size_t avail = n - o;
+  const std::size_t use = std::min(want, avail);
+  if (use < 64) return f;
+
   detail::StftConfig cfg;
-  cfg.fft_size = 512;
-  cfg.hop = 256;
+  cfg.fft_size = 1024;
+  cfg.hop = 512;
   if (sample_rate > 0.0) {
     const double scale = sample_rate / 44100.0;
-    cfg.fft_size = std::max(128, static_cast<int>(std::lround(512 * scale)));
-    cfg.hop = std::max(64, cfg.fft_size / 2);
+    cfg.fft_size = std::max(256, static_cast<int>(std::lround(1024 * scale)));
+    cfg.hop = std::max(128, cfg.fft_size / 2);
   }
-  const std::size_t use = std::min(n, static_cast<std::size_t>(sr * 0.045f));
-  const detail::StftData stft = detail::compute_stft(x, use, sample_rate, cfg);
+  const detail::StftData stft = detail::compute_stft(mono + o, use, sample_rate, cfg);
   if (stft.num_frames < 1 || stft.num_bins < 2) return f;
 
-  double e_lf = 0, e_mid = 0, e_hf = 0, e_tot = 0, wsum = 0, fsum = 0;
-  for (int fr = 0; fr < std::min(stft.num_frames, 3); ++fr) {
+  double e_sub = 0, e_lf = 0, e_mid = 0, e_hf = 0, e_air = 0, e_tot = 0, wsum = 0, fsum = 0;
+  const int frames = std::min(stft.num_frames, 4);
+  for (int fr = 0; fr < frames; ++fr) {
     for (int b = 0; b < stft.num_bins; ++b) {
       const float mag = stft.mag[static_cast<std::size_t>(fr * stft.num_bins + b)];
       const double p = static_cast<double>(mag) * mag;
@@ -209,35 +221,56 @@ BandFeat attack_bands(const float* x, std::size_t n, double sample_rate) {
       e_tot += p;
       fsum += p * hz;
       wsum += p;
+      if (hz >= 30.f && hz < 80.f) e_sub += p;
       if (hz >= 40.f && hz < 160.f) e_lf += p;
-      else if (hz >= 200.f && hz < 2000.f) e_mid += p;
-      else if (hz >= 2000.f && hz < 12000.f) e_hf += p;
+      if (hz >= 200.f && hz < 2000.f) e_mid += p;
+      if (hz >= 2000.f && hz < 12000.f) e_hf += p;
+      if (hz >= 6000.f && hz < 16000.f) e_air += p;
     }
   }
   f.total = static_cast<float>(e_tot + 1e-18);
+  f.sub = static_cast<float>(e_sub / (e_tot + 1e-18));
   f.lf = static_cast<float>(e_lf / (e_tot + 1e-18));
   f.mid = static_cast<float>(e_mid / (e_tot + 1e-18));
   f.hf = static_cast<float>(e_hf / (e_tot + 1e-18));
+  f.air = static_cast<float>(e_air / (e_tot + 1e-18));
   f.centroid_hz = (wsum > 1e-18) ? static_cast<float>(fsum / wsum) : 0.f;
   return f;
 }
 
 void classify_hit(SplitHit& hit, const float* mono, std::size_t n, double sample_rate) {
-  const std::size_t start = hit.start_sample;
-  if (start >= n) return;
-  const std::size_t len = std::min(hit.length_samples, n - start);
-  const BandFeat b = attack_bands(mono + start, len, sample_rate);
+  if (hit.start_sample >= n) return;
+  const BandFeat b = attack_bands(mono, n, hit.onset_sample, sample_rate);
   hit.centroid_hz = b.centroid_hz;
   hit.lf_ratio = b.lf;
   hit.hf_ratio = b.hf;
 
-  // Soft scores
-  const float kick_s = b.lf * 1.4f + (1.f - std::min(b.centroid_hz / 800.f, 1.f)) * 0.6f -
-                       b.hf * 0.8f;
-  const float snare_s = b.mid * 0.9f + b.hf * 0.7f +
-                        std::clamp((b.centroid_hz - 400.f) / 2000.f, 0.f, 1.f) * 0.5f - b.lf * 0.5f;
-  const float hat_s = b.hf * 1.5f + std::clamp((b.centroid_hz - 2000.f) / 4000.f, 0.f, 1.f) -
-                      b.lf * 1.2f - b.mid * 0.2f;
+  // Soft scores (sub-bass is the strongest kick cue on mixed breaks).
+  float kick_s = b.sub * 2.2f + b.lf * 1.6f + (1.f - std::min(b.centroid_hz / 500.f, 1.f)) * 0.7f -
+                 b.hf * 0.9f - b.air * 1.4f;
+  float snare_s = b.mid * 0.85f + b.hf * 0.85f +
+                  std::clamp((b.centroid_hz - 500.f) / 2500.f, 0.f, 1.f) * 0.45f - b.sub * 1.8f -
+                  b.lf * 0.7f;
+  float hat_s = b.hf * 1.2f + b.air * 1.8f +
+                std::clamp((b.centroid_hz - 2500.f) / 4000.f, 0.f, 1.f) - b.lf * 1.5f - b.sub * 2.f -
+                b.mid * 0.15f;
+
+  // Hard vetoes — stop kicks landing on snare when click/mid masks the body.
+  if (b.sub > 0.12f && b.lf > 0.12f && b.air < 0.18f) {
+    kick_s += 1.5f;
+    snare_s -= 0.8f;
+  }
+  if (b.lf > 0.22f && b.hf < 0.22f) {
+    kick_s += 1.2f;
+    snare_s -= 0.6f;
+  }
+  if (b.sub > 0.18f) {
+    kick_s += 1.0f;
+  }
+  if (b.air > 0.35f || (b.hf > 0.55f && b.lf < 0.05f)) {
+    hat_s += 1.2f;
+    kick_s -= 0.8f;
+  }
 
   float best = kick_s;
   HitKind kind = HitKind::Kick;
@@ -249,14 +282,21 @@ void classify_hit(SplitHit& hit, const float* mono, std::size_t n, double sample
     best = hat_s;
     kind = HitKind::Hat;
   }
-  // Low confidence → unknown
+
   const float second = (kind == HitKind::Kick)
                            ? std::max(snare_s, hat_s)
                            : (kind == HitKind::Snare ? std::max(kick_s, hat_s)
                                                     : std::max(kick_s, snare_s));
   const float margin = best - second;
-  hit.kind = (best > 0.15f && margin > 0.05f) ? kind : HitKind::Unknown;
-  hit.confidence = std::clamp(0.35f + margin * 0.9f + std::max(0.f, best) * 0.25f, 0.f, 1.f);
+
+  // Prefer kick on tight races when any real LF/sub is present.
+  if (margin < 0.08f && (b.lf > 0.15f || b.sub > 0.08f) && b.air < 0.25f) {
+    kind = HitKind::Kick;
+    best = kick_s;
+  }
+
+  hit.kind = (best > 0.12f && (margin > 0.04f || kind == HitKind::Kick)) ? kind : HitKind::Unknown;
+  hit.confidence = std::clamp(0.35f + margin * 0.9f + std::max(0.f, best) * 0.2f, 0.f, 1.f);
 }
 
 }  // namespace

@@ -61,6 +61,12 @@ void test_split() {
     CHECK(!one.empty());
   }
   CHECK(kicks >= 1);
+  // Synthetic kicks should classify as Kick (LF body).
+  bool classified_kick = false;
+  for (const auto& h : split.hits) {
+    if (h.kind == nodruma::HitKind::Kick && h.lf_ratio > 0.15f) classified_kick = true;
+  }
+  CHECK(classified_kick);
   // Snare classification can be soft on synthetic noise; require LF contrast on kicks.
   bool saw_lf_kick = false;
   for (const auto& h : split.hits) {

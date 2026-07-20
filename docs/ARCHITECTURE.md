@@ -8,6 +8,8 @@ Portable C++20 drum extraction / resynthesis engine. Phase 1 is headless:
 Working end-to-end: **split groove → classify → recreate** kick/snare/hat.
 
 - Split quality is strong on typical drum breaks.
+- Hit classification uses onset-aligned sub/LF/HF bands (fewer kick→snare errors).
+- Near-duplicate chops from dense flux peaks are still an open issue.
 - Snare recreation (layer mix) tracks chops closely on test material.
 - Hat recreation is usable on short HF hits; long/bleed-y chops vary.
 - Kick path is the most involved; still being shaped.
@@ -38,8 +40,9 @@ Tester guide: [USAGE.md](USAGE.md).
 2. Squared spectral flux with rising bin weights (HFC-ish) plus LF blend
 3. Adaptive smooth → upsample → robust threshold (`median + MAD`, floored by P90)
 4. Local-max peaks with `min_gap`; snap to amplitude attack
-5. Segment to next onset / `max_hit`; optional kick/snare/hat classify from
-   attack-band energy (LF / mid / HF + centroid)
+5. Segment to next onset / `max_hit`; classify kick/snare/hat from an
+   onset-aligned ~80 ms spectrum (sub / LF / mid / HF / air + centroid), with
+   hard vetoes so strong sub/LF cannot land on snare
 6. Export one-shots + `hits.json`; optional `--extract` re-runs `process` per hit
 
 API: `include/nodruma/split.hpp`, implementation `src/core/split.cpp`.
