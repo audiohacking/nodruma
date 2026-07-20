@@ -2,6 +2,7 @@ build/
 output/
 fixtures/
 webapp/wasm/build/
+webapp/wasm/build-assert/
 webapp/nodruma.js
 webapp/nodruma.wasm
 cmake-build-*/
