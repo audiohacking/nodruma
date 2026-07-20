@@ -1,0 +1,15 @@
+fixtures/
+build/
+output/
+cmake-build-*/
+.cache/
+compile_commands.json
+*.o
+*.a
+*.dylib
+*.so
+*.dll
+.DS_Store
+.idea/
+.vscode/
+
