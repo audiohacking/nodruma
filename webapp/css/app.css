@@ -533,6 +533,11 @@ kbd {
   min-height: 1.75rem;
 }
 
+.btn.danger {
+  color: var(--rose);
+  border-color: rgba(212, 120, 120, 0.45);
+}
+
 .btn.danger:hover:not(:disabled) {
   border-color: var(--rose);
   color: var(--rose);

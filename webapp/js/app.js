@@ -38,6 +38,7 @@
       padStats,
       btnLoad,
       btnAdd,
+      btnReset,
       btnBankPrev,
       btnBankNext,
       colEl,
@@ -72,7 +73,20 @@
       padGrid.classList.toggle("hidden", !show);
       btnAdd.disabled = busy || !has;
       btnLoad.disabled = busy;
+      if (btnReset) btnReset.disabled = busy || !has;
       updateExportButtons();
+    }
+
+    function resetColumn() {
+      if (busy) return;
+      player.clear(kit.idPrefix);
+      kit.reset(kit.exportName);
+      bank = 0;
+      dragPadId = null;
+      if (mode === "sampler" && api) api.clearChops();
+      if (mode === "drums" && api) api.clearHits();
+      hideProgress();
+      renderPads();
     }
 
     function setBank(next) {
@@ -400,6 +414,7 @@
     });
     btnLoad.addEventListener("click", () => openFilePicker("replace"));
     btnAdd.addEventListener("click", () => openFilePicker("append"));
+    btnReset?.addEventListener("click", () => resetColumn());
     fileInput.addEventListener("change", () => {
       const files = collectAudioFiles(fileInput.files);
       const append = loadMode === "append";
@@ -545,6 +560,7 @@
     padStats: document.getElementById("s-pad-stats"),
     btnLoad: document.getElementById("btn-s-load"),
     btnAdd: document.getElementById("btn-s-add"),
+    btnReset: document.getElementById("btn-s-reset"),
     btnBankPrev: document.getElementById("s-bank-prev"),
     btnBankNext: document.getElementById("s-bank-next"),
     colEl: document.getElementById("col-sampler"),
@@ -569,6 +585,7 @@
     padStats: document.getElementById("d-pad-stats"),
     btnLoad: document.getElementById("btn-d-load"),
     btnAdd: document.getElementById("btn-d-add"),
+    btnReset: document.getElementById("btn-d-reset"),
     btnBankPrev: document.getElementById("d-bank-prev"),
     btnBankNext: document.getElementById("d-bank-next"),
     colEl: document.getElementById("col-drums"),
