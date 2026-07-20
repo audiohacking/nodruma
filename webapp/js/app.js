@@ -25,7 +25,7 @@
   let loadMode = "replace";
 
   const BANK_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const AUDIO_EXT = /\.(wav|wave|aif|aiff|mp3|ogg|flac|m4a|aac|webm)$/i;
+  const AUDIO_EXT = /\.(wav|wave|aif|aiff|mp3|ogg|oga|flac|m4a|aac|opus|webm|caf)$/i;
 
   function setProgress(frac, label) {
     progress.classList.remove("hidden");
@@ -148,26 +148,10 @@
   }
 
   async function decodeFile(file) {
-    const ctx = player.ensureCtx();
+    // Resume playback ctx on user gesture; decode itself uses OfflineAudioContext @ 44.1k
+    player.ensureCtx();
     const ab = await file.arrayBuffer();
-    let audio;
-    try {
-      audio = await ctx.decodeAudioData(ab.slice(0));
-    } catch (err) {
-      throw new Error(`Could not decode “${file.name}” (${err.message || "unsupported format"})`);
-    }
-    const ch0 = audio.getChannelData(0);
-    let mono;
-    if (audio.numberOfChannels === 1) {
-      mono = new Float32Array(ch0);
-    } else {
-      mono = new Float32Array(ch0.length);
-      for (let c = 0; c < audio.numberOfChannels; c++) {
-        const ch = audio.getChannelData(c);
-        for (let i = 0; i < ch0.length; i++) mono[i] += ch[i] / audio.numberOfChannels;
-      }
-    }
-    return { mono, sampleRate: audio.sampleRate };
+    return decodeAudioBuffer(ab, file.name || "audio");
   }
 
   /**
@@ -232,7 +216,7 @@
   async function processFiles(files, opts = {}) {
     const list = collectAudioFiles(files);
     if (!list.length) {
-      alert("No audio files found. Try WAV, AIFF, MP3, OGG, or FLAC.");
+      alert("No audio files found. Try WAV, MP3, OGG, FLAC, M4A, AIFF, or AAC.");
       return;
     }
     if (busy) return;

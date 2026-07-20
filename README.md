@@ -20,8 +20,10 @@ Binary: `./build/nodruma`
 
 ## Live demo (WASM)
 
-Browser MPC kit builder under [`webapp/`](webapp/): drop a groove, play pads with
-keys `1–9`, keep / rename / discard, export a ZIP drumkit.
+Browser MPC kit builder under [`webapp/`](webapp/): drop a groove (WAV, MP3, OGG,
+FLAC, M4A, …), play pads with keys `1–9`, keep / rename / discard, export a ZIP
+drumkit. Decode runs in-browser at 44.1 kHz so device sample rate doesn’t change
+the engine.
 
 ```bash
 ./webapp/scripts/build_wasm.sh

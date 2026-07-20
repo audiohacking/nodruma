@@ -23,11 +23,20 @@ async function loadNodruma() {
 }
 
 function engineError(err, fallback) {
-  if (err instanceof Error) return err;
+  if (err instanceof Error) {
+    const m = err.message || "";
+    // Strip Emscripten's "Aborted(...)" wrapper when present
+    const aborted = m.match(/^Aborted\((.*)\)\.?\s*(?:Build with.*)?$/s);
+    if (aborted && aborted[1] && aborted[1] !== "undefined") {
+      return new Error(`${fallback}: ${aborted[1]}`);
+    }
+    if (m.includes("Aborted")) {
+      return new Error(`${fallback}: engine aborted (see console)`);
+    }
+    return err;
+  }
   if (typeof err === "number") {
-    return new Error(
-      `${fallback} (engine abort ${err}). Often out-of-memory on long files — try a shorter loop or reload.`
-    );
+    return new Error(`${fallback} (engine abort ${err})`);
   }
   return new Error(fallback + ": " + String(err));
 }
@@ -85,6 +94,7 @@ function wrapModule(Module) {
         const json = JSON.parse(utf8(jsonPtr));
         Module._nd_free(jsonPtr);
         jsonPtr = 0;
+        if (json.error) throw new Error(json.error);
 
         const hits = [];
         const count = Module._nd_hit_count();

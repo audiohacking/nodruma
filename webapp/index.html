@@ -28,9 +28,9 @@
     <section id="dropzone" class="dropzone" tabindex="0" aria-label="Drop audio files here">
       <div class="drop-inner">
         <p class="drop-title">Drop grooves or one-shots</p>
-        <p class="drop-sub">Drag &amp; drop · or Load audio · multi-select OK</p>
-        <p class="drop-pipe">Each file is split + recreated automatically</p>
-        <input type="file" id="file-input" accept="audio/*,.wav,.aif,.aiff,.mp3,.ogg,.flac,.m4a" multiple hidden />
+        <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A · AIFF · drag, load, multi-select</p>
+        <p class="drop-pipe">Each file is decoded in-browser, then split + recreated</p>
+        <input type="file" id="file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
       </div>
       <div id="progress" class="progress hidden">
         <div class="progress-bar"><div id="progress-fill"></div></div>

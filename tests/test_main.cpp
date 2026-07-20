@@ -29,6 +29,7 @@ void test_reference_fixtures();
 void test_zc_pitch();
 void test_body_cleanup();
 void test_split();
+void test_split_multirate();
 
 int main() {
   test_fft();
@@ -41,6 +42,7 @@ int main() {
   test_zc_pitch();
   test_body_cleanup();
   test_split();
+  test_split_multirate();
   std::cout << "passed=" << g_passed << " failed=" << g_failed << '\n';
   return g_failed ? 1 : 0;
 }

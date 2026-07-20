@@ -2,6 +2,7 @@
 
 #include "nodruma/wav_io.hpp"
 
+#include "fft.hpp"
 #include "smooth.hpp"
 #include "stft.hpp"
 
@@ -200,14 +201,11 @@ BandFeat attack_bands(const float* mono, std::size_t n, std::int64_t onset,
   const std::size_t use = std::min(want, avail);
   if (use < 64) return f;
 
+  // Must be power-of-two (Fft rejects others). Scale 1024@44.1k then snap —
+  // raw lround(1024 * sr/44100) breaks at 48 kHz (→1114) which browsers use.
   detail::StftConfig cfg;
-  cfg.fft_size = 1024;
-  cfg.hop = 512;
-  if (sample_rate > 0.0) {
-    const double scale = sample_rate / 44100.0;
-    cfg.fft_size = std::max(256, static_cast<int>(std::lround(1024 * scale)));
-    cfg.hop = std::max(128, cfg.fft_size / 2);
-  }
+  cfg.fft_size = detail::stft_size_for_rate(sample_rate, 1024);
+  cfg.hop = std::max(128, cfg.fft_size / 2);
   const detail::StftData stft = detail::compute_stft(mono + o, use, sample_rate, cfg);
   if (stft.num_frames < 1 || stft.num_bins < 2) return f;
 
@@ -305,6 +303,8 @@ SplitResult split_groove(const float* mono, std::size_t n, double sample_rate,
                          const SplitOptions& opts) {
   SplitResult out;
   if (!mono || n == 0 || sample_rate <= 0.0) return out;
+  // Practical bounds — extreme rates break hop/FFT assumptions.
+  if (sample_rate < 8000.0 || sample_rate > 192000.0) return out;
 
   const float sr = static_cast<float>(sample_rate);
   std::vector<std::int64_t> onsets;

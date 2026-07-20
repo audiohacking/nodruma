@@ -75,3 +75,33 @@ void test_split() {
   CHECK(saw_lf_kick);
   (void)snares;
 }
+
+/// Browser / MP3 paths often land at 48 kHz; also cover 96 kHz masters.
+void test_split_multirate() {
+  for (const double sr : {48000.0, 96000.0}) {
+    const std::size_t n = static_cast<std::size_t>(sr * 1.0);
+    std::vector<float> x(n, 0.f);
+    auto place_kick = [&](std::size_t at) {
+      for (std::size_t i = 0; i < 2000 && at + i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sr);
+        x[at + i] += 0.9f * std::exp(-t * 18.f) *
+                     std::sin(2.f * std::numbers::pi_v<float> * 55.f * t);
+      }
+      x[at] = 1.f;
+    };
+    place_kick(static_cast<std::size_t>(sr * 0.15));
+    place_kick(static_cast<std::size_t>(sr * 0.55));
+
+    nodruma::SplitOptions opts;
+    opts.threshold_scale = 0.85f;
+    opts.min_gap_sec = 0.08f;
+    // Must not throw (FFT size must stay power-of-two at any rate).
+    auto split = nodruma::split_groove(x.data(), x.size(), sr, opts);
+    CHECK(split.hits.size() >= 1);
+    for (const auto& h : split.hits) {
+      CHECK(h.length_samples > 32);
+      auto one = nodruma::extract_hit(nodruma::AudioBuffer::from_mono(x, sr), h);
+      CHECK(!one.empty());
+    }
+  }
+}

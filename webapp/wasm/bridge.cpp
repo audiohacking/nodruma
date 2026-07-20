@@ -12,6 +12,7 @@
 #include <cstring>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -67,46 +68,63 @@ char* nd_split(float* mono, int n, double sample_rate, float threshold, float mi
   if (!mono || n <= 0 || sample_rate <= 0.0) {
     return dup_cstr("{\"sample_rate\":0,\"num_hits\":0,\"hits\":[]}");
   }
-
-  nodruma::SplitOptions opts;
-  opts.threshold_scale = threshold > 0.f ? threshold : 1.f;
-  opts.min_gap_sec = min_gap > 0.f ? min_gap : 0.048f;
-
-  const auto split =
-      nodruma::split_groove(mono, static_cast<std::size_t>(n), sample_rate, opts);
-
-  nodruma::AudioBuffer source =
-      nodruma::AudioBuffer::from_mono(
-          std::span<const float>(mono, static_cast<std::size_t>(n)), sample_rate)
-          .to_stereo();
-
-  std::ostringstream json;
-  json << "{\"sample_rate\":" << sample_rate << ",\"num_hits\":" << split.hits.size()
-       << ",\"hits\":[";
-
-  for (std::size_t i = 0; i < split.hits.size(); ++i) {
-    const auto& h = split.hits[i];
-    nodruma::AudioBuffer one = nodruma::extract_hit(source, h);
-    CachedHit ch;
-    ch.kind = nodruma::hit_kind_name(h.kind);
-    ch.confidence = h.confidence;
-    ch.onset = h.onset_sample;
-    ch.lf = h.lf_ratio;
-    ch.hf = h.hf_ratio;
-    ch.centroid = h.centroid_hz;
-    ch.sample_rate = sample_rate;
-    ch.pcm = buffer_to_mono(one);
-    g_hits.push_back(std::move(ch));
-
-    if (i) json << ',';
-    json << "{\"index\":" << i << ",\"kind\":\"" << g_hits.back().kind
-         << "\",\"confidence\":" << h.confidence << ",\"onset_sample\":" << h.onset_sample
-         << ",\"lf_ratio\":" << h.lf_ratio << ",\"hf_ratio\":" << h.hf_ratio
-         << ",\"centroid_hz\":" << h.centroid_hz << ",\"frames\":" << g_hits.back().pcm.size()
-         << "}";
+  if (sample_rate < 8000.0 || sample_rate > 192000.0) {
+    return dup_cstr(
+        "{\"error\":\"sample rate must be between 8 kHz and 192 kHz\",\"sample_rate\":0,"
+        "\"num_hits\":0,\"hits\":[]}");
   }
-  json << "]}";
-  return dup_cstr(json.str());
+
+  try {
+    nodruma::SplitOptions opts;
+    opts.threshold_scale = threshold > 0.f ? threshold : 1.f;
+    opts.min_gap_sec = min_gap > 0.f ? min_gap : 0.048f;
+
+    const auto split =
+        nodruma::split_groove(mono, static_cast<std::size_t>(n), sample_rate, opts);
+
+    nodruma::AudioBuffer source =
+        nodruma::AudioBuffer::from_mono(
+            std::span<const float>(mono, static_cast<std::size_t>(n)), sample_rate)
+            .to_stereo();
+
+    std::ostringstream json;
+    json << "{\"sample_rate\":" << sample_rate << ",\"num_hits\":" << split.hits.size()
+         << ",\"hits\":[";
+
+    for (std::size_t i = 0; i < split.hits.size(); ++i) {
+      const auto& h = split.hits[i];
+      nodruma::AudioBuffer one = nodruma::extract_hit(source, h);
+      CachedHit ch;
+      ch.kind = nodruma::hit_kind_name(h.kind);
+      ch.confidence = h.confidence;
+      ch.onset = h.onset_sample;
+      ch.lf = h.lf_ratio;
+      ch.hf = h.hf_ratio;
+      ch.centroid = h.centroid_hz;
+      ch.sample_rate = sample_rate;
+      ch.pcm = buffer_to_mono(one);
+      g_hits.push_back(std::move(ch));
+
+      if (i) json << ',';
+      json << "{\"index\":" << i << ",\"kind\":\"" << g_hits.back().kind
+           << "\",\"confidence\":" << h.confidence << ",\"onset_sample\":" << h.onset_sample
+           << ",\"lf_ratio\":" << h.lf_ratio << ",\"hf_ratio\":" << h.hf_ratio
+           << ",\"centroid_hz\":" << h.centroid_hz << ",\"frames\":" << g_hits.back().pcm.size()
+           << "}";
+    }
+    json << "]}";
+    return dup_cstr(json.str());
+  } catch (const std::exception& ex) {
+    g_hits.clear();
+    std::ostringstream err;
+    err << "{\"error\":\"";
+    for (const char* p = ex.what(); *p; ++p) {
+      if (*p == '"' || *p == '\\') err << '\\';
+      err << *p;
+    }
+    err << "\",\"sample_rate\":0,\"num_hits\":0,\"hits\":[]}";
+    return dup_cstr(err.str());
+  }
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -131,6 +149,7 @@ float* nd_recreate(float* mono, int n, double sample_rate, const char* model_id,
                    int* out_frames) {
   if (out_frames) *out_frames = 0;
   if (!mono || n <= 0 || sample_rate <= 0.0 || !model_id) return nullptr;
+  if (sample_rate < 8000.0 || sample_rate > 192000.0) return nullptr;
 
   const char* mid = model_id;
   if (std::strcmp(mid, "kick") != 0 && std::strcmp(mid, "snare") != 0 &&
@@ -138,23 +157,27 @@ float* nd_recreate(float* mono, int n, double sample_rate, const char* model_id,
     return nullptr;
   }
 
-  nodruma::Session session;
-  session.set_model(nodruma::create_model(mid));
-  auto input = nodruma::AudioBuffer::from_mono(
-                   std::span<const float>(mono, static_cast<std::size_t>(n)), sample_rate)
-                   .to_stereo();
-  session.set_input(std::move(input));
+  try {
+    nodruma::Session session;
+    session.set_model(nodruma::create_model(mid));
+    auto input = nodruma::AudioBuffer::from_mono(
+                     std::span<const float>(mono, static_cast<std::size_t>(n)), sample_rate)
+                     .to_stereo();
+    session.set_input(std::move(input));
 
-  nodruma::Engine eng;
-  auto out = eng.process(session);
-  if (out.empty()) return nullptr;
+    nodruma::Engine eng;
+    auto out = eng.process(session);
+    if (out.empty()) return nullptr;
 
-  auto mono_out = buffer_to_mono(out);
-  float* buf = static_cast<float*>(std::malloc(mono_out.size() * sizeof(float)));
-  if (!buf) return nullptr;
-  std::memcpy(buf, mono_out.data(), mono_out.size() * sizeof(float));
-  if (out_frames) *out_frames = static_cast<int>(mono_out.size());
-  return buf;
+    auto mono_out = buffer_to_mono(out);
+    float* buf = static_cast<float*>(std::malloc(mono_out.size() * sizeof(float)));
+    if (!buf) return nullptr;
+    std::memcpy(buf, mono_out.data(), mono_out.size() * sizeof(float));
+    if (out_frames) *out_frames = static_cast<int>(mono_out.size());
+    return buf;
+  } catch (...) {
+    return nullptr;
+  }
 }
 
 }  // extern "C"

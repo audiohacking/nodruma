@@ -38,6 +38,10 @@ target_link_options(nodruma PRIVATE
   "SHELL:--no-entry"
 )
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_link_options(nodruma PRIVATE "SHELL:-sASSERTIONS=2" "SHELL:-O0")
+endif()
+
 set_target_properties(nodruma PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )

@@ -1,5 +1,6 @@
 #include "fft.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <numbers>
@@ -14,12 +15,18 @@ std::size_t next_pow2(std::size_t n) {
 }
 
 int stft_size_for_rate(double sample_rate, int size_at_44100) {
-  const double scale = sample_rate / 44100.0;
-  int sz = static_cast<int>(std::lround(size_at_44100 * scale));
-  // snap to power of two
-  int p = 32;
-  while (p < sz) p <<= 1;
-  return std::max(64, p);
+  // Clamp to practical audio rates so pathological inputs can't explode FFT size.
+  const double sr = std::clamp(sample_rate, 8000.0, 192000.0);
+  const int base = std::max(32, size_at_44100);
+  const double scale = sr / 44100.0;
+  const int sz = std::max(1, static_cast<int>(std::lround(static_cast<double>(base) * scale)));
+  // Nearest power of two (min 64). Ceiling-only snap jumps 48 kHz 1024→2048 and
+  // changes onset/classify behavior vs 44.1 kHz.
+  int lo = 32;
+  while (lo * 2 < sz) lo <<= 1;
+  const int hi = lo << 1;
+  const int nearest = (sz - lo <= hi - sz) ? lo : hi;
+  return std::max(64, nearest);
 }
 
 Fft::Fft(std::size_t size) : size_(size) {
