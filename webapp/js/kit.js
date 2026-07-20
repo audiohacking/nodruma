@@ -1,21 +1,29 @@
 /** Kit state: keep / rename / discard + ZIP export. */
 
 class Kit {
-  constructor() {
+  /**
+   * @param {{pageSize?:number,idPrefix?:string,exportName?:string}} [opts]
+   */
+  constructor(opts = {}) {
     /** @type {Array<{id:string,name:string,kind:string,confidence:number,pcm:Float32Array,sampleRate:number,discarded:boolean,recreated:boolean}>} */
     this.pads = [];
     this.sourceName = "kit";
+    this.pageSize = opts.pageSize || 9;
+    this.idPrefix = opts.idPrefix || "p";
+    this.exportName = opts.exportName || "kit";
+    this._seq = 0;
   }
 
   reset(sourceName) {
     this.pads = [];
-    this.sourceName = (sourceName || "kit").replace(/\.[^.]+$/, "");
+    this._seq = 0;
+    this.sourceName = (sourceName || this.exportName).replace(/\.[^.]+$/, "");
   }
 
   addPad(meta, pcm, sampleRate) {
-    const id = `p${this.pads.length}`;
+    const id = `${this.idPrefix}${this._seq++}`;
     const kind = meta.kind || "unknown";
-    const name = `${String(this.pads.length).padStart(3, "0")}_${kind}`;
+    const name = `${String(this.activePads().length).padStart(3, "0")}_${kind}`;
     this.pads.push({
       id,
       name,
@@ -34,12 +42,12 @@ class Kit {
   }
 
   bankCount() {
-    return Math.max(1, Math.ceil(this.activePads().length / 9));
+    return Math.max(1, Math.ceil(this.activePads().length / this.pageSize));
   }
 
   padAtBankSlot(bank, slot) {
     const active = this.activePads();
-    return active[bank * 9 + slot] || null;
+    return active[bank * this.pageSize + slot] || null;
   }
 
   discard(id) {
@@ -50,6 +58,59 @@ class Kit {
   rename(id, name) {
     const p = this.pads.find((x) => x.id === id);
     if (p && name.trim()) p.name = name.trim();
+  }
+
+  moveBefore(fromId, toId) {
+    if (!fromId || fromId === toId) return false;
+    const from = this.pads.findIndex((p) => p.id === fromId && !p.discarded);
+    if (from < 0) return false;
+    const [item] = this.pads.splice(from, 1);
+    if (!toId) {
+      this.pads.push(item);
+      return true;
+    }
+    const to = this.pads.findIndex((p) => p.id === toId && !p.discarded);
+    if (to < 0) {
+      this.pads.push(item);
+      return true;
+    }
+    this.pads.splice(to, 0, item);
+    return true;
+  }
+
+  swap(aId, bId) {
+    if (!aId || !bId || aId === bId) return false;
+    const i = this.pads.findIndex((p) => p.id === aId && !p.discarded);
+    const j = this.pads.findIndex((p) => p.id === bId && !p.discarded);
+    if (i < 0 || j < 0) return false;
+    const tmp = this.pads[i];
+    this.pads[i] = this.pads[j];
+    this.pads[j] = tmp;
+    return true;
+  }
+
+  nudge(id, delta) {
+    const active = this.activePads();
+    const ai = active.findIndex((p) => p.id === id);
+    if (ai < 0) return false;
+    const bi = ai + delta;
+    if (bi < 0 || bi >= active.length) return false;
+    return this.swap(active[ai].id, active[bi].id);
+  }
+
+  moveToActiveIndex(fromId, index) {
+    const from = this.pads.findIndex((p) => p.id === fromId && !p.discarded);
+    if (from < 0) return false;
+    const [item] = this.pads.splice(from, 1);
+    const active = this.pads.filter((p) => !p.discarded);
+    const clamped = Math.max(0, Math.min(active.length, index));
+    if (clamped >= active.length) {
+      this.pads.push(item);
+      return true;
+    }
+    const to = this.pads.findIndex((p) => p.id === active[clamped].id);
+    this.pads.splice(to, 0, item);
+    return true;
   }
 
   updatePcm(id, pcm, sampleRate) {
@@ -68,6 +129,7 @@ class Kit {
     const manifest = {
       name: this.sourceName,
       version: 1,
+      type: this.exportName,
       sample_rate: kept[0]?.sampleRate || 44100,
       pads: [],
     };
@@ -87,6 +149,31 @@ class Kit {
     return zip.generateAsync({ type: "blob" });
   }
 }
+
+/** QWERTY sampler: 20 pads per page (Q–P, A–;). */
+class SamplerKit extends Kit {
+  constructor() {
+    super({ pageSize: 20, idPrefix: "s", exportName: "chops" });
+  }
+}
+
+/** Drum replicator: 9 pads per bank. */
+class DrumKit extends Kit {
+  constructor() {
+    super({ pageSize: 9, idPrefix: "d", exportName: "kit" });
+  }
+}
+
+/** Two rows: QWERTY top, ASDF bottom (US layout). */
+const SAMPLER_KEYS = [
+  "q", "w", "e", "r", "t", "y", "u", "i", "o", "p",
+  "a", "s", "d", "f", "g", "h", "j", "k", "l", ";",
+];
+
+const SAMPLER_KEY_LABELS = [
+  "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P",
+  "A", "S", "D", "F", "G", "H", "J", "K", "L", ";",
+];
 
 function sanitize(name) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 64) || "pad";
@@ -123,4 +210,8 @@ function encodeWavMono(float32, sampleRate) {
 }
 
 window.Kit = Kit;
+window.DrumKit = DrumKit;
+window.SamplerKit = SamplerKit;
+window.SAMPLER_KEYS = SAMPLER_KEYS;
+window.SAMPLER_KEY_LABELS = SAMPLER_KEY_LABELS;
 window.encodeWavMono = encodeWavMono;

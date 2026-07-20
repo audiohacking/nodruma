@@ -1,52 +1,522 @@
 (() => {
-  const dropzone = document.getElementById("dropzone");
-  const fileInput = document.getElementById("file-input");
-  const progress = document.getElementById("progress");
-  const progressFill = document.getElementById("progress-fill");
-  const progressLabel = document.getElementById("progress-label");
-  const dropInner = dropzone.querySelector(".drop-inner");
-  const deck = document.getElementById("deck");
-  const padGrid = document.getElementById("pad-grid");
-  const bankLabel = document.getElementById("bank-label");
-  const padStats = document.getElementById("pad-stats");
-  const btnExport = document.getElementById("btn-export");
-  const btnLoad = document.getElementById("btn-load");
-  const btnAdd = document.getElementById("btn-add");
-  const engineVer = document.getElementById("engine-ver");
-
-  const player = new PadPlayer();
-  const kit = new Kit();
-  let api = null;
-  let bank = 0;
-  let busy = false;
-  let dragDepth = 0;
-
-  /** @type {'replace'|'append'} */
-  let loadMode = "replace";
-
   const BANK_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const AUDIO_EXT = /\.(wav|wave|aif|aiff|mp3|ogg|oga|flac|m4a|aac|opus|webm|caf)$/i;
+  const SWIPE_MIN = 48;
 
-  function setProgress(frac, label) {
-    progress.classList.remove("hidden");
-    dropInner?.classList.add("hidden");
-    progressFill.style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
-    progressLabel.textContent = label || "";
+  const player = new PadPlayer();
+  const drums = new DrumKit();
+  const sampler = new SamplerKit();
+  let api = null;
+  let busy = false;
+  let globalDragDepth = 0;
+
+  const engineVer = document.getElementById("engine-ver");
+  const workspace = document.getElementById("workspace");
+  const btnExport = document.getElementById("btn-export");
+  const exportDropdown = document.getElementById("export-dropdown");
+  const btnExportDrums = document.getElementById("btn-export-drums");
+  const btnExportChops = document.getElementById("btn-export-chops");
+
+  /**
+   * @param {object} cfg
+   */
+  function makeColumn(cfg) {
+    const {
+      kit,
+      prefix,
+      pageLabel,
+      dropzone,
+      fileInput,
+      progress,
+      progressFill,
+      progressLabel,
+      dropInner,
+      deckBar,
+      legend,
+      padGrid,
+      bankLabel,
+      padStats,
+      btnLoad,
+      btnAdd,
+      btnBankPrev,
+      btnBankNext,
+      colEl,
+      mode, // 'drums' | 'sampler'
+    } = cfg;
+
+    let bank = 0;
+    let dragPadId = null;
+    let suppressPlayUntil = 0;
+    /** @type {'replace'|'append'} */
+    let loadMode = "replace";
+    let swipe = null;
+
+    function setProgress(frac, label) {
+      progress.classList.remove("hidden");
+      dropInner?.classList.add("hidden");
+      progressFill.style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
+      progressLabel.textContent = label || "";
+    }
+
+    function hideProgress() {
+      progress.classList.add("hidden");
+      dropInner?.classList.remove("hidden");
+    }
+
+    function syncChrome() {
+      const has = kit.activePads().length > 0;
+      const show = has || (busy && cfg.activeBusy);
+      colEl.classList.toggle("has-kit", has);
+      deckBar.classList.toggle("hidden", !show);
+      legend.classList.toggle("hidden", !show);
+      padGrid.classList.toggle("hidden", !show);
+      btnAdd.disabled = busy || !has;
+      btnLoad.disabled = busy;
+      updateExportButtons();
+    }
+
+    function setBank(next) {
+      const banks = kit.bankCount();
+      bank = Math.max(0, Math.min(banks - 1, next));
+      renderPads();
+    }
+
+    function shiftBank(delta) {
+      setBank(bank + delta);
+    }
+
+    function keyLabel(slot) {
+      if (mode === "sampler") return SAMPLER_KEY_LABELS[slot] || String(slot + 1);
+      return String(slot + 1);
+    }
+
+    function renderPads() {
+      const active = kit.activePads();
+      const banks = kit.bankCount();
+      if (bank >= banks) bank = Math.max(0, banks - 1);
+
+      if (mode === "sampler") {
+        bankLabel.textContent = `PAGE ${bank + 1}`;
+        padStats.textContent = `${active.length} chops · ${banks} page${banks > 1 ? "s" : ""}`;
+      } else {
+        bankLabel.textContent = `BANK ${BANK_NAMES[bank] || bank}`;
+        padStats.textContent = `${active.length} pads · ${banks} bank${banks > 1 ? "s" : ""}`;
+      }
+
+      btnBankPrev.disabled = bank <= 0;
+      btnBankNext.disabled = bank >= banks - 1;
+      syncChrome();
+
+      const slots = kit.pageSize;
+      padGrid.innerHTML = "";
+      for (let slot = 0; slot < slots; slot++) {
+        const pad = kit.padAtBankSlot(bank, slot);
+        const el = document.createElement("div");
+        el.className = "pad" + (pad ? ` ${pad.kind}` : " empty");
+        el.dataset.slot = String(slot);
+        if (pad) {
+          el.dataset.padId = pad.id;
+          el.draggable = true;
+        }
+
+        const key = document.createElement("span");
+        key.className = "pad-key";
+        key.textContent = keyLabel(slot);
+        el.appendChild(key);
+
+        if (!pad) {
+          el.addEventListener("dragover", (e) => {
+            if (!dragPadId) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            el.classList.add("drag-over");
+          });
+          el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+          el.addEventListener("drop", (e) => {
+            e.preventDefault();
+            el.classList.remove("drag-over");
+            const fromId = e.dataTransfer.getData("text/plain") || dragPadId;
+            if (!fromId) return;
+            if (kit.moveToActiveIndex(fromId, bank * kit.pageSize + slot)) renderPads();
+            suppressPlayUntil = Date.now() + 400;
+          });
+          padGrid.appendChild(el);
+          continue;
+        }
+
+        const kind = document.createElement("span");
+        kind.className = "pad-kind";
+        kind.textContent = pad.recreated ? `${pad.kind} · rebuilt` : pad.kind;
+        el.appendChild(kind);
+
+        const name = document.createElement("input");
+        name.className = "pad-name";
+        name.type = "text";
+        name.value = pad.name;
+        name.spellcheck = false;
+        name.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          el.draggable = false;
+        });
+        name.addEventListener("click", (e) => e.stopPropagation());
+        name.addEventListener("blur", () => {
+          el.draggable = true;
+          if (name.value.trim()) kit.rename(pad.id, name.value);
+          else name.value = pad.name;
+        });
+        name.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            name.blur();
+          }
+          if (e.key === "Escape") {
+            name.value = pad.name;
+            name.blur();
+          }
+        });
+        name.addEventListener("change", () => {
+          kit.rename(pad.id, name.value);
+          name.value = kit.activePads().find((p) => p.id === pad.id)?.name || name.value;
+        });
+        el.appendChild(name);
+
+        const actions = document.createElement("div");
+        actions.className = "pad-actions";
+
+        const leftBtn = document.createElement("button");
+        leftBtn.type = "button";
+        leftBtn.className = "btn tiny";
+        leftBtn.textContent = "◀";
+        leftBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (kit.nudge(pad.id, -1)) renderPads();
+        });
+
+        const rightBtn = document.createElement("button");
+        rightBtn.type = "button";
+        rightBtn.className = "btn tiny";
+        rightBtn.textContent = "▶";
+        rightBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (kit.nudge(pad.id, 1)) renderPads();
+        });
+
+        const playBtn = document.createElement("button");
+        playBtn.type = "button";
+        playBtn.className = "btn tiny";
+        playBtn.textContent = "▶";
+        playBtn.title = "Play";
+        playBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          triggerPad(pad, el);
+        });
+
+        const discardBtn = document.createElement("button");
+        discardBtn.type = "button";
+        discardBtn.className = "btn tiny danger";
+        discardBtn.textContent = "×";
+        discardBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          kit.discard(pad.id);
+          player.remove(pad.id);
+          renderPads();
+        });
+
+        actions.append(leftBtn, rightBtn, playBtn, discardBtn);
+        el.appendChild(actions);
+
+        el.addEventListener("click", (e) => {
+          if (e.target.closest("input, button, .pad-actions")) return;
+          if (Date.now() < suppressPlayUntil) return;
+          triggerPad(pad, el);
+        });
+
+        el.addEventListener("dragstart", (e) => {
+          dragPadId = pad.id;
+          el.classList.add("drag-src");
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", pad.id);
+          suppressPlayUntil = Date.now() + 400;
+        });
+        el.addEventListener("dragend", () => {
+          dragPadId = null;
+          el.classList.remove("drag-src");
+          padGrid.querySelectorAll(".drag-over").forEach((n) => n.classList.remove("drag-over"));
+        });
+        el.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          el.classList.add("drag-over");
+        });
+        el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+        el.addEventListener("drop", (e) => {
+          e.preventDefault();
+          el.classList.remove("drag-over");
+          const fromId = e.dataTransfer.getData("text/plain") || dragPadId;
+          if (!fromId || fromId === pad.id) return;
+          if (kit.moveBefore(fromId, pad.id)) renderPads();
+          suppressPlayUntil = Date.now() + 400;
+        });
+
+        padGrid.appendChild(el);
+      }
+    }
+
+    function triggerPad(pad, el) {
+      player.ensureCtx();
+      player.play(pad.id);
+      if (el) {
+        el.classList.add("flash");
+        setTimeout(() => el.classList.remove("flash"), 120);
+      }
+    }
+
+    async function ingestSource(file, progressBase, progressSpan, labelPrefix) {
+      const { mono, sampleRate } = await decodeFile(file);
+      setProgress(
+        progressBase + progressSpan * 0.2,
+        `${labelPrefix} ${mode === "sampler" ? "chopping" : "splitting"}…`
+      );
+      await yieldToUi();
+
+      let hits;
+      if (mode === "sampler") {
+        api.clearChops();
+        ({ hits } = api.chop(mono, sampleRate, { threshold: 1.0, minGap: 0.048 }));
+      } else {
+        api.clearHits();
+        ({ hits } = api.split(mono, sampleRate, { threshold: 1.0, minGap: 0.048 }));
+      }
+
+      if (!hits.length) {
+        const pad = kit.addPad(
+          { kind: mode === "sampler" ? "chop" : "unknown", confidence: 0, index: 0 },
+          mono,
+          sampleRate
+        );
+        player.setSample(pad.id, pad.pcm, pad.sampleRate);
+        return [pad];
+      }
+
+      const added = [];
+      for (const h of hits) {
+        const stem = file.name.replace(/\.[^.]+$/, "");
+        const pad = kit.addPad(h.meta, h.pcm, h.sampleRate);
+        if (hits.length === 1) pad.name = stem;
+        else pad.name = `${stem}_${pad.name}`;
+        player.setSample(pad.id, pad.pcm, pad.sampleRate);
+        added.push(pad);
+      }
+
+      if (mode === "drums") {
+        const toRebuild = added.filter(
+          (p) => p.kind === "kick" || p.kind === "snare" || p.kind === "hat"
+        );
+        for (let i = 0; i < toRebuild.length; i++) {
+          const p = toRebuild[i];
+          const t = (i + 1) / Math.max(1, toRebuild.length);
+          setProgress(
+            progressBase + progressSpan * (0.35 + 0.65 * t),
+            `${labelPrefix} recreating ${p.kind}…`
+          );
+          await yieldToUi();
+          try {
+            const out = api.recreate(p.pcm, p.sampleRate, p.kind);
+            if (out && out.length) {
+              kit.updatePcm(p.id, out, p.sampleRate);
+              player.setSample(p.id, out, p.sampleRate);
+            }
+          } catch (err) {
+            console.warn("recreate failed", p.name, err);
+          }
+        }
+      }
+      return added;
+    }
+
+    async function processFiles(files, opts = {}) {
+      const list = collectAudioFiles(files);
+      if (!list.length) {
+        alert("No audio files found. Try WAV, MP3, OGG, FLAC, M4A, AIFF, or AAC.");
+        return;
+      }
+      if (busy) return;
+      if (!api) await initEngine();
+      if (!api) return;
+
+      const append = !!opts.append && kit.pads.length > 0;
+      busy = true;
+      cfg.activeBusy = true;
+      setBusyGlobal(true);
+      syncChrome();
+
+      try {
+        if (!append) {
+          player.clear(kit.idPrefix);
+          kit.reset(list.length === 1 ? list[0].name : kit.exportName);
+          bank = 0;
+        } else if (list.length > 1) {
+          kit.sourceName = kit.exportName;
+        }
+
+        for (let i = 0; i < list.length; i++) {
+          const file = list[i];
+          const base = i / list.length;
+          const span = 1 / list.length;
+          const prefix =
+            list.length > 1 ? `[${i + 1}/${list.length}] ${file.name}` : file.name;
+          setProgress(base, `${prefix} — decoding…`);
+          await yieldToUi();
+          await ingestSource(file, base, span, prefix);
+          renderPads();
+        }
+
+        setProgress(1, `Done — ${kit.activePads().length}`);
+        renderPads();
+        setTimeout(hideProgress, 700);
+      } catch (err) {
+        console.error(err);
+        hideProgress();
+        alert(err?.message || String(err));
+      } finally {
+        busy = false;
+        cfg.activeBusy = false;
+        setBusyGlobal(false);
+        renderPads();
+      }
+    }
+
+    function openFilePicker(modeName) {
+      loadMode = modeName;
+      fileInput.value = "";
+      fileInput.click();
+    }
+
+    dropzone.addEventListener("click", (e) => {
+      if (busy) return;
+      if (e.target.closest("button")) return;
+      openFilePicker(kit.pads.length ? "append" : "replace");
+    });
+    btnLoad.addEventListener("click", () => openFilePicker("replace"));
+    btnAdd.addEventListener("click", () => openFilePicker("append"));
+    fileInput.addEventListener("change", () => {
+      const files = collectAudioFiles(fileInput.files);
+      const append = loadMode === "append";
+      fileInput.value = "";
+      if (files.length) processFiles(files, { append });
+    });
+
+    // Column-scoped file drops
+    dropzone.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("drag");
+    });
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    dropzone.addEventListener("dragleave", (e) => {
+      if (!dropzone.contains(e.relatedTarget)) dropzone.classList.remove("drag");
+    });
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove("drag");
+      if (busy) return;
+      if (!e.dataTransfer?.files?.length) return;
+      processFiles(collectAudioFiles(e.dataTransfer.files), {
+        append: kit.pads.length > 0,
+      });
+    });
+
+    btnBankPrev.addEventListener("click", () => shiftBank(-1));
+    btnBankNext.addEventListener("click", () => shiftBank(1));
+
+    padGrid.addEventListener(
+      "touchstart",
+      (e) => {
+        if (busy || kit.activePads().length === 0) return;
+        const t = e.changedTouches[0];
+        swipe = { x: t.clientX, y: t.clientY, bank: false };
+      },
+      { passive: true }
+    );
+    padGrid.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!swipe) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - swipe.x;
+        const dy = t.clientY - swipe.y;
+        if (Math.abs(dx) > SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.15) {
+          if (!swipe.bank) {
+            swipe.bank = true;
+            shiftBank(dx < 0 ? 1 : -1);
+            suppressPlayUntil = Date.now() + 500;
+          }
+        }
+      },
+      { passive: true }
+    );
+    padGrid.addEventListener("touchend", () => {
+      swipe = null;
+    }, { passive: true });
+    padGrid.addEventListener("touchcancel", () => {
+      swipe = null;
+    }, { passive: true });
+
+    return {
+      kit,
+      mode,
+      prefix,
+      renderPads,
+      shiftBank,
+      setBank,
+      processFiles,
+      triggerPad,
+      get bank() {
+        return bank;
+      },
+      padAtSlot(slot) {
+        return kit.padAtBankSlot(bank, slot);
+      },
+      padGrid,
+    };
   }
 
-  function hideProgress() {
-    progress.classList.add("hidden");
-    dropInner?.classList.remove("hidden");
+  function collectAudioFiles(fileList) {
+    return Array.from(fileList || []).filter((file) => {
+      if (!file) return false;
+      if (file.type && file.type.startsWith("audio/")) return true;
+      return AUDIO_EXT.test(file.name || "");
+    });
   }
 
-  function setBusy(on) {
+  async function decodeFile(file) {
+    player.ensureCtx();
+    const ab = await file.arrayBuffer();
+    return decodeAudioBuffer(ab, file.name || "audio");
+  }
+
+  function yieldToUi() {
+    return new Promise((r) => setTimeout(r, 0));
+  }
+
+  function updateExportButtons() {
+    const hasD = drums.activePads().length > 0;
+    const hasS = sampler.activePads().length > 0;
+    btnExport.disabled = busy || (!hasD && !hasS);
+    btnExportDrums.disabled = !hasD;
+    btnExportChops.disabled = !hasS;
+  }
+
+  function setBusyGlobal(on) {
     busy = on;
-    btnLoad.disabled = on;
-    btnAdd.disabled = on || kit.activePads().length === 0;
-    btnExport.disabled = on || kit.activePads().length === 0;
+    updateExportButtons();
   }
 
-  async function init() {
+  async function initEngine() {
     try {
       api = await loadNodruma();
       engineVer.textContent = `engine ${api.version()}`;
@@ -57,305 +527,148 @@
     }
   }
 
-  function renderPads() {
-    const active = kit.activePads();
-    const banks = kit.bankCount();
-    if (bank >= banks) bank = Math.max(0, banks - 1);
-    bankLabel.textContent = `BANK ${BANK_NAMES[bank] || bank} · keys 1–9`;
-    padStats.textContent = `${active.length} pads · ${banks} bank${banks > 1 ? "s" : ""}`;
-    if (!busy) {
-      btnExport.disabled = active.length === 0;
-      btnAdd.disabled = active.length === 0;
-    }
+  const samplerCol = makeColumn({
+    kit: sampler,
+    prefix: "s",
+    pageLabel: "PAGE",
+    mode: "sampler",
+    dropzone: document.getElementById("s-dropzone"),
+    fileInput: document.getElementById("s-file-input"),
+    progress: document.getElementById("s-progress"),
+    progressFill: document.getElementById("s-progress-fill"),
+    progressLabel: document.getElementById("s-progress-label"),
+    dropInner: document.querySelector("#s-dropzone .drop-inner"),
+    deckBar: document.getElementById("s-deck-bar"),
+    legend: document.getElementById("s-legend"),
+    padGrid: document.getElementById("s-pad-grid"),
+    bankLabel: document.getElementById("s-bank-label"),
+    padStats: document.getElementById("s-pad-stats"),
+    btnLoad: document.getElementById("btn-s-load"),
+    btnAdd: document.getElementById("btn-s-add"),
+    btnBankPrev: document.getElementById("s-bank-prev"),
+    btnBankNext: document.getElementById("s-bank-next"),
+    colEl: document.getElementById("col-sampler"),
+    activeBusy: false,
+  });
 
-    padGrid.innerHTML = "";
-    for (let slot = 0; slot < 9; slot++) {
-      const pad = kit.padAtBankSlot(bank, slot);
-      const el = document.createElement("div");
-      el.className = "pad" + (pad ? ` ${pad.kind}` : " empty");
-      el.dataset.slot = String(slot);
+  const drumsCol = makeColumn({
+    kit: drums,
+    prefix: "d",
+    pageLabel: "BANK",
+    mode: "drums",
+    dropzone: document.getElementById("d-dropzone"),
+    fileInput: document.getElementById("d-file-input"),
+    progress: document.getElementById("d-progress"),
+    progressFill: document.getElementById("d-progress-fill"),
+    progressLabel: document.getElementById("d-progress-label"),
+    dropInner: document.querySelector("#d-dropzone .drop-inner"),
+    deckBar: document.getElementById("d-deck-bar"),
+    legend: document.getElementById("d-legend"),
+    padGrid: document.getElementById("d-pad-grid"),
+    bankLabel: document.getElementById("d-bank-label"),
+    padStats: document.getElementById("d-pad-stats"),
+    btnLoad: document.getElementById("btn-d-load"),
+    btnAdd: document.getElementById("btn-d-add"),
+    btnBankPrev: document.getElementById("d-bank-prev"),
+    btnBankNext: document.getElementById("d-bank-next"),
+    colEl: document.getElementById("col-drums"),
+    activeBusy: false,
+  });
 
-      const key = document.createElement("span");
-      key.className = "pad-key";
-      key.textContent = String(slot + 1);
-      el.appendChild(key);
+  // Prevent browser navigation on stray file drops
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    globalDragDepth = 0;
+  });
 
-      if (!pad) {
-        padGrid.appendChild(el);
-        continue;
-      }
-
-      const kind = document.createElement("span");
-      kind.className = "pad-kind";
-      kind.textContent = pad.recreated ? `${pad.kind} · rebuilt` : pad.kind;
-      el.appendChild(kind);
-
-      const name = document.createElement("input");
-      name.className = "pad-name";
-      name.value = pad.name;
-      name.spellcheck = false;
-      name.addEventListener("change", () => kit.rename(pad.id, name.value));
-      name.addEventListener("click", (e) => e.stopPropagation());
-      el.appendChild(name);
-
-      const actions = document.createElement("div");
-      actions.className = "pad-actions";
-
-      const playBtn = document.createElement("button");
-      playBtn.type = "button";
-      playBtn.className = "btn tiny";
-      playBtn.textContent = "Play";
-      playBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        triggerPad(pad, el);
+  // Mobile tabs
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.tab;
+      workspace.dataset.tab = tab;
+      document.querySelectorAll(".tab-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tab === tab);
       });
-
-      const discardBtn = document.createElement("button");
-      discardBtn.type = "button";
-      discardBtn.className = "btn tiny danger";
-      discardBtn.textContent = "Discard";
-      discardBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        kit.discard(pad.id);
-        renderPads();
-      });
-
-      actions.append(playBtn, discardBtn);
-      el.appendChild(actions);
-
-      el.addEventListener("pointerdown", () => triggerPad(pad, el));
-      padGrid.appendChild(el);
-    }
-  }
-
-  function triggerPad(pad, el) {
-    player.ensureCtx();
-    player.play(pad.id);
-    if (el) {
-      el.classList.add("flash");
-      setTimeout(() => el.classList.remove("flash"), 120);
-    }
-  }
-
-  function isAudioFile(file) {
-    if (!file) return false;
-    if (file.type && file.type.startsWith("audio/")) return true;
-    return AUDIO_EXT.test(file.name || "");
-  }
-
-  function collectAudioFiles(fileList) {
-    return Array.from(fileList || []).filter(isAudioFile);
-  }
-
-  async function decodeFile(file) {
-    // Resume playback ctx on user gesture; decode itself uses OfflineAudioContext @ 44.1k
-    player.ensureCtx();
-    const ab = await file.arrayBuffer();
-    return decodeAudioBuffer(ab, file.name || "audio");
-  }
-
-  /**
-   * Split + recreate one source file; returns new pad objects added.
-   */
-  async function ingestSource(file, progressBase, progressSpan, labelPrefix) {
-    const { mono, sampleRate } = await decodeFile(file);
-    setProgress(progressBase + progressSpan * 0.15, `${labelPrefix} splitting…`);
-    await yieldToUi();
-
-    api.clearHits();
-    const { hits } = api.split(mono, sampleRate, { threshold: 1.0, minGap: 0.048 });
-    if (!hits.length) {
-      // Treat whole file as a single unknown chop so one-shots still land on a pad
-      const pad = kit.addPad(
-        { kind: "unknown", confidence: 0, index: 0 },
-        mono,
-        sampleRate
-      );
-      player.setSample(pad.id, pad.pcm, pad.sampleRate);
-      return [pad];
-    }
-
-    const added = [];
-    for (const h of hits) {
-      const stem = file.name.replace(/\.[^.]+$/, "");
-      const pad = kit.addPad(h.meta, h.pcm, h.sampleRate);
-      if (hits.length === 1) pad.name = stem;
-      else pad.name = `${stem}_${pad.name}`;
-      player.setSample(pad.id, pad.pcm, pad.sampleRate);
-      added.push(pad);
-    }
-
-    const toRebuild = added.filter(
-      (p) => p.kind === "kick" || p.kind === "snare" || p.kind === "hat"
-    );
-    for (let i = 0; i < toRebuild.length; i++) {
-      const p = toRebuild[i];
-      const t = (i + 1) / Math.max(1, toRebuild.length);
-      setProgress(
-        progressBase + progressSpan * (0.3 + 0.7 * t),
-        `${labelPrefix} recreating ${p.kind}…`
-      );
-      await yieldToUi();
-      try {
-        const out = api.recreate(p.pcm, p.sampleRate, p.kind);
-        if (out && out.length) {
-          kit.updatePcm(p.id, out, p.sampleRate);
-          player.setSample(p.id, out, p.sampleRate);
-        }
-      } catch (err) {
-        console.warn("recreate failed", p.name, err);
-      }
-    }
-    return added;
-  }
-
-  /**
-   * @param {File[]} files
-   * @param {{append?: boolean}} opts
-   */
-  async function processFiles(files, opts = {}) {
-    const list = collectAudioFiles(files);
-    if (!list.length) {
-      alert("No audio files found. Try WAV, MP3, OGG, FLAC, M4A, AIFF, or AAC.");
-      return;
-    }
-    if (busy) return;
-
-    if (!api) await init();
-    if (!api) return;
-
-    const append = !!opts.append && kit.pads.length > 0;
-    setBusy(true);
-    deck.classList.remove("hidden");
-
-    try {
-      if (!append) {
-        player.clear();
-        kit.reset(list.length === 1 ? list[0].name : "kit");
-        bank = 0;
-      } else if (kit.sourceName === "kit" || list.length > 1) {
-        kit.sourceName = "kit";
-      }
-
-      for (let i = 0; i < list.length; i++) {
-        const file = list[i];
-        const base = i / list.length;
-        const span = 1 / list.length;
-        const prefix = list.length > 1 ? `[${i + 1}/${list.length}] ${file.name}` : file.name;
-        setProgress(base, `${prefix} — decoding…`);
-        await yieldToUi();
-        await ingestSource(file, base, span, prefix);
-        renderPads();
-      }
-
-      setProgress(1, `Done — ${kit.activePads().length} pads`);
-      renderPads();
-      setTimeout(hideProgress, 700);
-    } catch (err) {
-      console.error(err);
-      hideProgress();
-      const msg =
-        err && err.message
-          ? err.message
-          : typeof err === "number"
-            ? `Engine aborted (${err}). Try a shorter loop or reload the page.`
-            : String(err);
-      alert(msg);
-    } finally {
-      setBusy(false);
-      renderPads();
-    }
-  }
-
-  function yieldToUi() {
-    return new Promise((r) => setTimeout(r, 0));
-  }
-
-  function openFilePicker(mode) {
-    loadMode = mode;
-    fileInput.value = "";
-    fileInput.click();
-  }
-
-  // --- Click / button load ---
-  dropzone.addEventListener("click", (e) => {
-    if (busy) return;
-    if (e.target.closest("button")) return;
-    openFilePicker(kit.pads.length ? "append" : "replace");
+    });
   });
-  btnLoad.addEventListener("click", () => openFilePicker("replace"));
-  btnAdd.addEventListener("click", () => openFilePicker("append"));
+  workspace.dataset.tab = "sampler";
 
-  fileInput.addEventListener("change", () => {
-    const files = collectAudioFiles(fileInput.files);
-    const append = loadMode === "append";
-    fileInput.value = "";
-    if (files.length) processFiles(files, { append });
+  // Export menu
+  btnExport.addEventListener("click", (e) => {
+    e.stopPropagation();
+    exportDropdown.classList.toggle("hidden");
   });
+  document.addEventListener("click", () => exportDropdown.classList.add("hidden"));
 
-  // --- Drag & drop (window-level so the browser never navigates away) ---
-  function onDragEnter(e) {
-    e.preventDefault();
-    dragDepth += 1;
-    dropzone.classList.add("drag");
-  }
-  function onDragOver(e) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-  }
-  function onDragLeave(e) {
-    e.preventDefault();
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) dropzone.classList.remove("drag");
-  }
-  function onDrop(e) {
-    e.preventDefault();
-    dragDepth = 0;
-    dropzone.classList.remove("drag");
-    if (busy) return;
-    const files = collectAudioFiles(e.dataTransfer?.files);
-    processFiles(files, { append: kit.pads.length > 0 });
-  }
-
-  window.addEventListener("dragenter", onDragEnter);
-  window.addEventListener("dragover", onDragOver);
-  window.addEventListener("dragleave", onDragLeave);
-  window.addEventListener("drop", onDrop);
-
-  document.getElementById("bank-prev").addEventListener("click", () => {
-    bank = Math.max(0, bank - 1);
-    renderPads();
-  });
-  document.getElementById("bank-next").addEventListener("click", () => {
-    bank = Math.min(kit.bankCount() - 1, bank + 1);
-    renderPads();
-  });
-
-  btnExport.addEventListener("click", async () => {
+  async function downloadZip(kit, suffix) {
     try {
       const blob = await kit.exportZip();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${kit.sourceName || "nodruma"}_kit.zip`;
+      a.download = `${kit.sourceName || suffix}_${suffix}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (err) {
       alert(err.message || String(err));
     }
+  }
+
+  btnExportDrums.addEventListener("click", () => {
+    exportDropdown.classList.add("hidden");
+    downloadZip(drums, "kit");
+  });
+  btnExportChops.addEventListener("click", () => {
+    exportDropdown.classList.add("hidden");
+    downloadZip(sampler, "chops");
   });
 
+  // Keyboard: digits → drums, QWERTY → sampler, PgUp/Dn → focused column banks
   window.addEventListener("keydown", (e) => {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+
+    if (e.key === "PageUp" || e.key === "PageDown") {
+      const tab = workspace.dataset.tab || "sampler";
+      const narrow = window.matchMedia("(max-width: 1099px)").matches;
+      const target = narrow
+        ? tab === "drums"
+          ? drumsCol
+          : samplerCol
+        : drums.activePads().length
+          ? drumsCol
+          : samplerCol;
+      if (target.kit.activePads().length === 0) return;
+      e.preventDefault();
+      target.shiftBank(e.key === "PageUp" ? -1 : 1);
+      return;
+    }
+
+    // Digits → drums
     let num = null;
     if (e.code.startsWith("Digit")) num = Number(e.code.slice(5));
     if (e.code.startsWith("Numpad")) num = Number(e.code.slice(6));
-    if (!num || num < 1 || num > 9) return;
-    const pad = kit.padAtBankSlot(bank, num - 1);
+    if (num && num >= 1 && num <= 9) {
+      const pad = drumsCol.padAtSlot(num - 1);
+      if (!pad) return;
+      e.preventDefault();
+      const el = drumsCol.padGrid.querySelector(`[data-slot="${num - 1}"]`);
+      drumsCol.triggerPad(pad, el);
+      return;
+    }
+
+    // QWERTY → sampler
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const slot = SAMPLER_KEYS.indexOf(key);
+    if (slot < 0) return;
+    const pad = samplerCol.padAtSlot(slot);
     if (!pad) return;
     e.preventDefault();
-    const el = padGrid.querySelector(`[data-slot="${num - 1}"]`);
-    triggerPad(pad, el);
+    const el = samplerCol.padGrid.querySelector(`[data-slot="${slot}"]`);
+    samplerCol.triggerPad(pad, el);
   });
 
-  init();
+  samplerCol.renderPads();
+  drumsCol.renderPads();
+  updateExportButtons();
+  initEngine();
 })();

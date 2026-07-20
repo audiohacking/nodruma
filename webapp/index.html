@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>nodruma — MPC kit builder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>nodruma — sampler + drum replicator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
@@ -14,48 +14,110 @@
   <header class="top">
     <div class="brand">
       <h1>nodruma</h1>
-      <p class="tag">drop or load · split · recreate · pad · export</p>
+      <p class="tag">chop · recreate · pad · export</p>
     </div>
     <div class="top-actions">
       <span id="engine-ver" class="meta">loading engine…</span>
-      <button type="button" id="btn-load" class="btn ghost">Load audio</button>
-      <button type="button" id="btn-add" class="btn ghost" disabled>Add more</button>
-      <button type="button" id="btn-export" class="btn primary" disabled>Export kit</button>
+      <div class="export-menu">
+        <button type="button" id="btn-export" class="btn primary" disabled>Export</button>
+        <div id="export-dropdown" class="export-dropdown hidden" role="menu">
+          <button type="button" id="btn-export-drums" class="btn ghost" role="menuitem" disabled>Export drums</button>
+          <button type="button" id="btn-export-chops" class="btn ghost" role="menuitem" disabled>Export chops</button>
+        </div>
+      </div>
     </div>
   </header>
 
-  <main>
-    <section id="dropzone" class="dropzone" tabindex="0" aria-label="Drop audio files here">
-      <div class="drop-inner">
-        <p class="drop-title">Drop grooves or one-shots</p>
-        <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A · AIFF · drag, load, multi-select</p>
-        <p class="drop-pipe">Each file is decoded in-browser, then split + recreated</p>
-        <input type="file" id="file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
+  <nav class="mobile-tabs" id="mobile-tabs" aria-label="Workspace">
+    <button type="button" class="tab-btn active" data-tab="sampler">Sampler</button>
+    <button type="button" class="tab-btn" data-tab="drums">Drums</button>
+  </nav>
+
+  <main class="workspace" id="workspace">
+    <!-- LEFT: generic sample chopper -->
+    <section class="column sampler-col" id="col-sampler" data-col="sampler">
+      <header class="col-head">
+        <h2>Sampler</h2>
+        <p class="col-sub">QWERTY chops · no recreate</p>
+        <div class="col-actions">
+          <button type="button" id="btn-s-load" class="btn ghost">Load</button>
+          <button type="button" id="btn-s-add" class="btn ghost" disabled>Add</button>
+        </div>
+      </header>
+
+      <div class="deck-bar hidden" id="s-deck-bar">
+        <div class="bank-ctrl">
+          <button type="button" id="s-bank-prev" class="btn ghost bank-btn" aria-label="Previous page">◀</button>
+          <span id="s-bank-label" class="bank-label">PAGE 1</span>
+          <button type="button" id="s-bank-next" class="btn ghost bank-btn" aria-label="Next page">▶</button>
+        </div>
+        <p class="hint"><kbd>Q</kbd>–<kbd>P</kbd> <kbd>A</kbd>–<kbd>;</kbd> · rename · drag · swipe</p>
       </div>
-      <div id="progress" class="progress hidden">
-        <div class="progress-bar"><div id="progress-fill"></div></div>
-        <p id="progress-label">Working…</p>
+
+      <div class="stage-panels">
+        <section id="s-dropzone" class="dropzone panel" tabindex="0" aria-label="Drop audio to chop">
+          <div class="drop-inner">
+            <p class="drop-title">Chop samples</p>
+            <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A</p>
+            <p class="drop-pipe">Transient cuts → QWERTY</p>
+          </div>
+          <div id="s-progress" class="progress hidden">
+            <div class="progress-bar"><div id="s-progress-fill"></div></div>
+            <p id="s-progress-label">Working…</p>
+          </div>
+          <input type="file" id="s-file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
+        </section>
+        <div id="s-pad-grid" class="pad-grid sampler-grid panel hidden" role="group" aria-label="Sampler pads"></div>
       </div>
+
+      <aside class="legend hidden" id="s-legend">
+        <span class="pill chop">chop</span>
+        <span id="s-pad-stats" class="meta"></span>
+      </aside>
     </section>
 
-    <section class="deck hidden" id="deck">
-      <div class="deck-bar">
-        <div class="bank-ctrl">
-          <button type="button" id="bank-prev" class="btn ghost" aria-label="Previous bank">◀</button>
-          <span id="bank-label" class="bank-label">BANK A · keys 1–9</span>
-          <button type="button" id="bank-next" class="btn ghost" aria-label="Next bank">▶</button>
+    <!-- RIGHT: drum replicator -->
+    <section class="column drums-col" id="col-drums" data-col="drums">
+      <header class="col-head">
+        <h2>Drums</h2>
+        <p class="col-sub">Split · classify · recreate</p>
+        <div class="col-actions">
+          <button type="button" id="btn-d-load" class="btn ghost">Load</button>
+          <button type="button" id="btn-d-add" class="btn ghost" disabled>Add</button>
         </div>
-        <p class="hint">Play pads with <kbd>1</kbd>–<kbd>9</kbd> · rename · discard · drop more to append</p>
+      </header>
+
+      <div class="deck-bar hidden" id="d-deck-bar">
+        <div class="bank-ctrl">
+          <button type="button" id="d-bank-prev" class="btn ghost bank-btn" aria-label="Previous bank">◀</button>
+          <span id="d-bank-label" class="bank-label">BANK A</span>
+          <button type="button" id="d-bank-next" class="btn ghost bank-btn" aria-label="Next bank">▶</button>
+        </div>
+        <p class="hint"><kbd>1</kbd>–<kbd>9</kbd> · rename · drag · <kbd>PgUp</kbd>/<kbd>PgDn</kbd></p>
       </div>
 
-      <div id="pad-grid" class="pad-grid" role="group" aria-label="Drum pads"></div>
+      <div class="stage-panels">
+        <section id="d-dropzone" class="dropzone panel" tabindex="0" aria-label="Drop groove to split">
+          <div class="drop-inner">
+            <p class="drop-title">Drum groove</p>
+            <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A</p>
+            <p class="drop-pipe">Split + recreate → pads</p>
+          </div>
+          <div id="d-progress" class="progress hidden">
+            <div class="progress-bar"><div id="d-progress-fill"></div></div>
+            <p id="d-progress-label">Working…</p>
+          </div>
+          <input type="file" id="d-file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
+        </section>
+        <div id="d-pad-grid" class="pad-grid drum-grid panel hidden" role="group" aria-label="Drum pads"></div>
+      </div>
 
-      <aside class="legend">
+      <aside class="legend hidden" id="d-legend">
         <span class="pill kick">kick</span>
         <span class="pill snare">snare</span>
         <span class="pill hat">hat</span>
         <span class="pill unknown">unknown</span>
-        <span id="pad-stats" class="meta"></span>
+        <span id="d-pad-stats" class="meta"></span>
       </aside>
     </section>
   </main>

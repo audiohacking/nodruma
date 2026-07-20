@@ -72,12 +72,17 @@ function wrapModule(Module) {
       Module._nd_clear_hits();
     },
 
+    clearChops() {
+      Module._nd_clear_chops();
+    },
+
     /**
      * @param {Float32Array} mono
      * @param {number} sampleRate
      * @param {{threshold?:number,minGap?:number}} opts
+     * @param {{fn:string,countFn:string,pcmFn:string,label:string}} bridge
      */
-    split(mono, sampleRate, opts = {}) {
+    _collectHits(mono, sampleRate, opts, bridge) {
       const n = mono.length;
       if (n <= 0) return { json: { num_hits: 0, hits: [] }, hits: [] };
 
@@ -87,17 +92,17 @@ function wrapModule(Module) {
         ptr = allocF32(mono);
         const thr = opts.threshold ?? 1.0;
         const gap = opts.minGap ?? 0.048;
-        jsonPtr = Module._nd_split(ptr, n, sampleRate, thr, gap);
+        jsonPtr = Module[bridge.fn](ptr, n, sampleRate, thr, gap);
         Module._nd_free(ptr);
         ptr = 0;
-        if (!jsonPtr) throw new Error("split failed");
+        if (!jsonPtr) throw new Error(`${bridge.label} failed`);
         const json = JSON.parse(utf8(jsonPtr));
         Module._nd_free(jsonPtr);
         jsonPtr = 0;
         if (json.error) throw new Error(json.error);
 
         const hits = [];
-        const count = Module._nd_hit_count();
+        const count = Module[bridge.countFn]();
         for (let i = 0; i < count; i++) {
           const framesPtr = Module._nd_malloc(4);
           const srPtr = Module._nd_malloc(8);
@@ -106,7 +111,7 @@ function wrapModule(Module) {
             if (srPtr) Module._nd_free(srPtr);
             throw new Error("Out of memory reading hit PCM");
           }
-          const pcmPtr = Module._nd_hit_pcm(i, framesPtr, srPtr);
+          const pcmPtr = Module[bridge.pcmFn](i, framesPtr, srPtr);
           const frames = Module.getValue(framesPtr, "i32");
           const sr = Module.getValue(srPtr, "double");
           Module._nd_free(framesPtr);
@@ -119,8 +124,37 @@ function wrapModule(Module) {
       } catch (err) {
         if (ptr) Module._nd_free(ptr);
         if (jsonPtr) Module._nd_free(jsonPtr);
-        throw engineError(err, "Split failed");
+        throw engineError(err, `${bridge.label} failed`);
       }
+    },
+
+    /**
+     * @param {Float32Array} mono
+     * @param {number} sampleRate
+     * @param {{threshold?:number,minGap?:number}} opts
+     */
+    split(mono, sampleRate, opts = {}) {
+      return this._collectHits(mono, sampleRate, opts, {
+        fn: "_nd_split",
+        countFn: "_nd_hit_count",
+        pcmFn: "_nd_hit_pcm",
+        label: "Split",
+      });
+    },
+
+    /**
+     * Generic sample chops (no classify / recreate).
+     * @param {Float32Array} mono
+     * @param {number} sampleRate
+     * @param {{threshold?:number,minGap?:number}} opts
+     */
+    chop(mono, sampleRate, opts = {}) {
+      return this._collectHits(mono, sampleRate, opts, {
+        fn: "_nd_chop",
+        countFn: "_nd_chop_count",
+        pcmFn: "_nd_chop_pcm",
+        label: "Chop",
+      });
     },
 
     /**

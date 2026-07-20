@@ -112,8 +112,18 @@ class PadPlayer {
     this.buffers.set(padId, buf);
   }
 
-  clear() {
-    this.buffers.clear();
+  clear(prefix) {
+    if (!prefix) {
+      this.buffers.clear();
+      return;
+    }
+    for (const k of [...this.buffers.keys()]) {
+      if (k.startsWith(prefix)) this.buffers.delete(k);
+    }
+  }
+
+  remove(padId) {
+    this.buffers.delete(padId);
   }
 
   play(padId) {

@@ -33,7 +33,7 @@ target_link_options(nodruma PRIVATE
   "SHELL:-sEXPORT_NAME=createNodruma"
   "SHELL:-sENVIRONMENT=web,node"
   "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','UTF8ToString','HEAPF32','HEAPU8']"
-  "SHELL:-sEXPORTED_FUNCTIONS=['_nd_malloc','_nd_free','_nd_version','_nd_clear_hits','_nd_split','_nd_hit_count','_nd_hit_pcm','_nd_recreate']"
+  "SHELL:-sEXPORTED_FUNCTIONS=['_nd_malloc','_nd_free','_nd_version','_nd_clear_hits','_nd_clear_chops','_nd_split','_nd_chop','_nd_hit_count','_nd_chop_count','_nd_hit_pcm','_nd_chop_pcm','_nd_recreate']"
   "SHELL:-O2"
   "SHELL:--no-entry"
 )
