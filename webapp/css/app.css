@@ -119,10 +119,17 @@ main {
   text-align: center;
 }
 
-.drop-sub {
-  margin: 0.4rem 0 0;
-  color: var(--muted);
+.drop-pipe {
+  margin: 0.75rem 0 0;
+  color: var(--amber-dim);
   text-align: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.top-actions .btn.ghost {
+  background: transparent;
 }
 
 .progress {

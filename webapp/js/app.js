@@ -4,28 +4,46 @@
   const progress = document.getElementById("progress");
   const progressFill = document.getElementById("progress-fill");
   const progressLabel = document.getElementById("progress-label");
+  const dropInner = dropzone.querySelector(".drop-inner");
   const deck = document.getElementById("deck");
   const padGrid = document.getElementById("pad-grid");
   const bankLabel = document.getElementById("bank-label");
   const padStats = document.getElementById("pad-stats");
   const btnExport = document.getElementById("btn-export");
+  const btnLoad = document.getElementById("btn-load");
+  const btnAdd = document.getElementById("btn-add");
   const engineVer = document.getElementById("engine-ver");
 
   const player = new PadPlayer();
   const kit = new Kit();
   let api = null;
   let bank = 0;
+  let busy = false;
+  let dragDepth = 0;
+
+  /** @type {'replace'|'append'} */
+  let loadMode = "replace";
 
   const BANK_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const AUDIO_EXT = /\.(wav|wave|aif|aiff|mp3|ogg|flac|m4a|aac|webm)$/i;
 
   function setProgress(frac, label) {
     progress.classList.remove("hidden");
-    progressFill.style.width = `${Math.round(frac * 100)}%`;
+    dropInner?.classList.add("hidden");
+    progressFill.style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
     progressLabel.textContent = label || "";
   }
 
   function hideProgress() {
     progress.classList.add("hidden");
+    dropInner?.classList.remove("hidden");
+  }
+
+  function setBusy(on) {
+    busy = on;
+    btnLoad.disabled = on;
+    btnAdd.disabled = on || kit.activePads().length === 0;
+    btnExport.disabled = on || kit.activePads().length === 0;
   }
 
   async function init() {
@@ -45,7 +63,10 @@
     if (bank >= banks) bank = Math.max(0, banks - 1);
     bankLabel.textContent = `BANK ${BANK_NAMES[bank] || bank} · keys 1–9`;
     padStats.textContent = `${active.length} pads · ${banks} bank${banks > 1 ? "s" : ""}`;
-    btnExport.disabled = active.length === 0;
+    if (!busy) {
+      btnExport.disabled = active.length === 0;
+      btnAdd.disabled = active.length === 0;
+    }
 
     padGrid.innerHTML = "";
     for (let slot = 0; slot < 9; slot++) {
@@ -116,52 +137,80 @@
     }
   }
 
+  function isAudioFile(file) {
+    if (!file) return false;
+    if (file.type && file.type.startsWith("audio/")) return true;
+    return AUDIO_EXT.test(file.name || "");
+  }
+
+  function collectAudioFiles(fileList) {
+    return Array.from(fileList || []).filter(isAudioFile);
+  }
+
   async function decodeFile(file) {
     const ctx = player.ensureCtx();
     const ab = await file.arrayBuffer();
-    const audio = await ctx.decodeAudioData(ab.slice(0));
+    let audio;
+    try {
+      audio = await ctx.decodeAudioData(ab.slice(0));
+    } catch (err) {
+      throw new Error(`Could not decode “${file.name}” (${err.message || "unsupported format"})`);
+    }
     const ch0 = audio.getChannelData(0);
     let mono;
     if (audio.numberOfChannels === 1) {
       mono = new Float32Array(ch0);
     } else {
-      const ch1 = audio.getChannelData(1);
       mono = new Float32Array(ch0.length);
-      for (let i = 0; i < ch0.length; i++) mono[i] = 0.5 * (ch0[i] + ch1[i]);
+      for (let c = 0; c < audio.numberOfChannels; c++) {
+        const ch = audio.getChannelData(c);
+        for (let i = 0; i < ch0.length; i++) mono[i] += ch[i] / audio.numberOfChannels;
+      }
     }
     return { mono, sampleRate: audio.sampleRate };
   }
 
-  async function processFile(file) {
-    if (!api) await init();
-    if (!api) return;
-
-    dropzone.querySelector(".drop-inner")?.classList.add("hidden");
-    deck.classList.remove("hidden");
-    player.clear();
-    kit.reset(file.name);
-    api.clearHits();
-    bank = 0;
-
-    setProgress(0.05, "Decoding audio…");
+  /**
+   * Split + recreate one source file; returns new pad objects added.
+   */
+  async function ingestSource(file, progressBase, progressSpan, labelPrefix) {
     const { mono, sampleRate } = await decodeFile(file);
-
-    setProgress(0.2, "Splitting groove…");
+    setProgress(progressBase + progressSpan * 0.15, `${labelPrefix} splitting…`);
     await yieldToUi();
+
+    api.clearHits();
     const { hits } = api.split(mono, sampleRate, { threshold: 1.0, minGap: 0.048 });
-
-    setProgress(0.4, `Found ${hits.length} hits — loading pads…`);
-    for (const h of hits) {
-      const pad = kit.addPad(h.meta, h.pcm, h.sampleRate);
+    if (!hits.length) {
+      // Treat whole file as a single unknown chop so one-shots still land on a pad
+      const pad = kit.addPad(
+        { kind: "unknown", confidence: 0, index: 0 },
+        mono,
+        sampleRate
+      );
       player.setSample(pad.id, pad.pcm, pad.sampleRate);
+      return [pad];
     }
-    renderPads();
 
-    // Background recreate for classified hits
-    const toRebuild = kit.pads.filter((p) => p.kind === "kick" || p.kind === "snare" || p.kind === "hat");
+    const added = [];
+    for (const h of hits) {
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      const pad = kit.addPad(h.meta, h.pcm, h.sampleRate);
+      if (hits.length === 1) pad.name = stem;
+      else pad.name = `${stem}_${pad.name}`;
+      player.setSample(pad.id, pad.pcm, pad.sampleRate);
+      added.push(pad);
+    }
+
+    const toRebuild = added.filter(
+      (p) => p.kind === "kick" || p.kind === "snare" || p.kind === "hat"
+    );
     for (let i = 0; i < toRebuild.length; i++) {
       const p = toRebuild[i];
-      setProgress(0.45 + (0.5 * (i + 1)) / Math.max(1, toRebuild.length), `Recreating ${p.name}…`);
+      const t = (i + 1) / Math.max(1, toRebuild.length);
+      setProgress(
+        progressBase + progressSpan * (0.3 + 0.7 * t),
+        `${labelPrefix} recreating ${p.kind}…`
+      );
       await yieldToUi();
       try {
         const out = api.recreate(p.pcm, p.sampleRate, p.kind);
@@ -172,36 +221,116 @@
       } catch (err) {
         console.warn("recreate failed", p.name, err);
       }
-      if (i % 3 === 2) renderPads();
     }
+    return added;
+  }
 
-    setProgress(1, "Done");
-    renderPads();
-    setTimeout(hideProgress, 600);
-    dropzone.querySelector(".drop-inner")?.classList.remove("hidden");
+  /**
+   * @param {File[]} files
+   * @param {{append?: boolean}} opts
+   */
+  async function processFiles(files, opts = {}) {
+    const list = collectAudioFiles(files);
+    if (!list.length) {
+      alert("No audio files found. Try WAV, AIFF, MP3, OGG, or FLAC.");
+      return;
+    }
+    if (busy) return;
+
+    if (!api) await init();
+    if (!api) return;
+
+    const append = !!opts.append && kit.pads.length > 0;
+    setBusy(true);
+    deck.classList.remove("hidden");
+
+    try {
+      if (!append) {
+        player.clear();
+        kit.reset(list.length === 1 ? list[0].name : "kit");
+        bank = 0;
+      } else if (kit.sourceName === "kit" || list.length > 1) {
+        kit.sourceName = "kit";
+      }
+
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const base = i / list.length;
+        const span = 1 / list.length;
+        const prefix = list.length > 1 ? `[${i + 1}/${list.length}] ${file.name}` : file.name;
+        setProgress(base, `${prefix} — decoding…`);
+        await yieldToUi();
+        await ingestSource(file, base, span, prefix);
+        renderPads();
+      }
+
+      setProgress(1, `Done — ${kit.activePads().length} pads`);
+      renderPads();
+      setTimeout(hideProgress, 700);
+    } catch (err) {
+      console.error(err);
+      hideProgress();
+      alert(err.message || String(err));
+    } finally {
+      setBusy(false);
+      renderPads();
+    }
   }
 
   function yieldToUi() {
     return new Promise((r) => setTimeout(r, 0));
   }
 
-  dropzone.addEventListener("click", () => fileInput.click());
-  dropzone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    dropzone.classList.add("drag");
-  });
-  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag"));
-  dropzone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropzone.classList.remove("drag");
-    const f = e.dataTransfer?.files?.[0];
-    if (f) processFile(f);
-  });
-  fileInput.addEventListener("change", () => {
-    const f = fileInput.files?.[0];
-    if (f) processFile(f);
+  function openFilePicker(mode) {
+    loadMode = mode;
     fileInput.value = "";
+    fileInput.click();
+  }
+
+  // --- Click / button load ---
+  dropzone.addEventListener("click", (e) => {
+    if (busy) return;
+    if (e.target.closest("button")) return;
+    openFilePicker(kit.pads.length ? "append" : "replace");
   });
+  btnLoad.addEventListener("click", () => openFilePicker("replace"));
+  btnAdd.addEventListener("click", () => openFilePicker("append"));
+
+  fileInput.addEventListener("change", () => {
+    const files = collectAudioFiles(fileInput.files);
+    const append = loadMode === "append";
+    fileInput.value = "";
+    if (files.length) processFiles(files, { append });
+  });
+
+  // --- Drag & drop (window-level so the browser never navigates away) ---
+  function onDragEnter(e) {
+    e.preventDefault();
+    dragDepth += 1;
+    dropzone.classList.add("drag");
+  }
+  function onDragOver(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e) {
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropzone.classList.remove("drag");
+  }
+  function onDrop(e) {
+    e.preventDefault();
+    dragDepth = 0;
+    dropzone.classList.remove("drag");
+    if (busy) return;
+    const files = collectAudioFiles(e.dataTransfer?.files);
+    processFiles(files, { append: kit.pads.length > 0 });
+  }
+
+  window.addEventListener("dragenter", onDragEnter);
+  window.addEventListener("dragover", onDragOver);
+  window.addEventListener("dragleave", onDragLeave);
+  window.addEventListener("drop", onDrop);
 
   document.getElementById("bank-prev").addEventListener("click", () => {
     bank = Math.max(0, bank - 1);

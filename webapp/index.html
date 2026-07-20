@@ -14,20 +14,23 @@
   <header class="top">
     <div class="brand">
       <h1>nodruma</h1>
-      <p class="tag">drop a groove · chop · pad · export</p>
+      <p class="tag">drop or load · split · recreate · pad · export</p>
     </div>
     <div class="top-actions">
       <span id="engine-ver" class="meta">loading engine…</span>
+      <button type="button" id="btn-load" class="btn ghost">Load audio</button>
+      <button type="button" id="btn-add" class="btn ghost" disabled>Add more</button>
       <button type="button" id="btn-export" class="btn primary" disabled>Export kit</button>
     </div>
   </header>
 
   <main>
-    <section id="dropzone" class="dropzone" tabindex="0">
+    <section id="dropzone" class="dropzone" tabindex="0" aria-label="Drop audio files here">
       <div class="drop-inner">
-        <p class="drop-title">Drop a drum loop</p>
-        <p class="drop-sub">WAV / AIFF / MP3 · or click to browse</p>
-        <input type="file" id="file-input" accept="audio/*,.wav,.aif,.aiff,.mp3" hidden />
+        <p class="drop-title">Drop grooves or one-shots</p>
+        <p class="drop-sub">Drag &amp; drop · or Load audio · multi-select OK</p>
+        <p class="drop-pipe">Each file is split + recreated automatically</p>
+        <input type="file" id="file-input" accept="audio/*,.wav,.aif,.aiff,.mp3,.ogg,.flac,.m4a" multiple hidden />
       </div>
       <div id="progress" class="progress hidden">
         <div class="progress-bar"><div id="progress-fill"></div></div>
@@ -42,7 +45,7 @@
           <span id="bank-label" class="bank-label">BANK A · keys 1–9</span>
           <button type="button" id="bank-next" class="btn ghost" aria-label="Next bank">▶</button>
         </div>
-        <p class="hint">Play pads with <kbd>1</kbd>–<kbd>9</kbd> · rename · discard extras</p>
+        <p class="hint">Play pads with <kbd>1</kbd>–<kbd>9</kbd> · rename · discard · drop more to append</p>
       </div>
 
       <div id="pad-grid" class="pad-grid" role="group" aria-label="Drum pads"></div>
