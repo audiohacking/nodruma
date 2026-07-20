@@ -26,6 +26,9 @@ set_target_properties(nodruma PROPERTIES OUTPUT_NAME "nodruma")
 
 target_link_options(nodruma PRIVATE
   "SHELL:-sALLOW_MEMORY_GROWTH=1"
+  "SHELL:-sINITIAL_MEMORY=67108864"
+  "SHELL:-sMAXIMUM_MEMORY=1073741824"
+  "SHELL:-sSTACK_SIZE=2097152"
   "SHELL:-sMODULARIZE=1"
   "SHELL:-sEXPORT_NAME=createNodruma"
   "SHELL:-sENVIRONMENT=web,node"

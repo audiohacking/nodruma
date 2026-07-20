@@ -270,7 +270,13 @@
     } catch (err) {
       console.error(err);
       hideProgress();
-      alert(err.message || String(err));
+      const msg =
+        err && err.message
+          ? err.message
+          : typeof err === "number"
+            ? `Engine aborted (${err}). Try a shorter loop or reload the page.`
+            : String(err);
+      alert(msg);
     } finally {
       setBusy(false);
       renderPads();
