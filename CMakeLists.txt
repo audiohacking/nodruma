@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(NODRUMA_BUILD_TESTS "Build unit tests" ON)
 option(NODRUMA_BUILD_SHARED "Build shared library" OFF)
+option(NODRUMA_BUILD_CLI "Build nodruma CLI" ON)
 
 add_library(nodruma_core
   src/core/audio_buffer.cpp
@@ -52,12 +53,14 @@ else()
   target_compile_options(nodruma_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(nodruma_cli tools/nodruma_cli/main.cpp)
-target_link_libraries(nodruma_cli PRIVATE nodruma::core)
-target_include_directories(nodruma_cli PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
-)
-set_target_properties(nodruma_cli PROPERTIES OUTPUT_NAME nodruma)
+if(NODRUMA_BUILD_CLI)
+  add_executable(nodruma_cli tools/nodruma_cli/main.cpp)
+  target_link_libraries(nodruma_cli PRIVATE nodruma::core)
+  target_include_directories(nodruma_cli PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  )
+  set_target_properties(nodruma_cli PROPERTIES OUTPUT_NAME nodruma)
+endif()
 
 if(NODRUMA_BUILD_TESTS)
   enable_testing()
@@ -81,9 +84,14 @@ if(NODRUMA_BUILD_TESTS)
   add_test(NAME nodruma_tests COMMAND nodruma_tests)
 endif()
 
-install(TARGETS nodruma_core nodruma_cli
+install(TARGETS nodruma_core
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
 )
+if(NODRUMA_BUILD_CLI)
+  install(TARGETS nodruma_cli
+    RUNTIME DESTINATION bin
+  )
+endif()
 install(DIRECTORY include/nodruma DESTINATION include)

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nodruma — MPC kit builder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="top">
+    <div class="brand">
+      <h1>nodruma</h1>
+      <p class="tag">drop a groove · chop · pad · export</p>
+    </div>
+    <div class="top-actions">
+      <span id="engine-ver" class="meta">loading engine…</span>
+      <button type="button" id="btn-export" class="btn primary" disabled>Export kit</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="dropzone" class="dropzone" tabindex="0">
+      <div class="drop-inner">
+        <p class="drop-title">Drop a drum loop</p>
+        <p class="drop-sub">WAV / AIFF / MP3 · or click to browse</p>
+        <input type="file" id="file-input" accept="audio/*,.wav,.aif,.aiff,.mp3" hidden />
+      </div>
+      <div id="progress" class="progress hidden">
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <p id="progress-label">Working…</p>
+      </div>
+    </section>
+
+    <section class="deck hidden" id="deck">
+      <div class="deck-bar">
+        <div class="bank-ctrl">
+          <button type="button" id="bank-prev" class="btn ghost" aria-label="Previous bank">◀</button>
+          <span id="bank-label" class="bank-label">BANK A · keys 1–9</span>
+          <button type="button" id="bank-next" class="btn ghost" aria-label="Next bank">▶</button>
+        </div>
+        <p class="hint">Play pads with <kbd>1</kbd>–<kbd>9</kbd> · rename · discard extras</p>
+      </div>
+
+      <div id="pad-grid" class="pad-grid" role="group" aria-label="Drum pads"></div>
+
+      <aside class="legend">
+        <span class="pill kick">kick</span>
+        <span class="pill snare">snare</span>
+        <span class="pill hat">hat</span>
+        <span class="pill unknown">unknown</span>
+        <span id="pad-stats" class="meta"></span>
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <p>nodruma demo · chops run in-browser via WebAssembly · <a href="https://github.com/audiohacking/nodruma">source</a></p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/kit.js"></script>
+  <script src="js/wasm.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

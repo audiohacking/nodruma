@@ -18,6 +18,19 @@ Binary: `./build/nodruma`
 ./build/nodruma help split
 ```
 
+## Live demo (WASM)
+
+Browser MPC kit builder under [`webapp/`](webapp/): drop a groove, play pads with
+keys `1–9`, keep / rename / discard, export a ZIP drumkit.
+
+```bash
+./webapp/scripts/build_wasm.sh
+python3 -m http.server 8080 -d webapp
+```
+
+GitHub Pages deploys from `main` via [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+(enable Pages → GitHub Actions in repo settings).
+
 ## What works today
 
 | Feature | Status |
@@ -88,6 +101,7 @@ Full flag lists: `nodruma help <command>` or [docs/USAGE.md](docs/USAGE.md).
 - `src/core/` — FFT, onset, split, STFT, extract, synth, engine  
 - `src/models/` — kick / snare / hat  
 - `tools/nodruma_cli/` — CLI  
+- `webapp/` — WASM MPC demo (GitHub Pages)  
 - `tests/` — unit tests  
 - `output/` — local generations (gitignored)  
 

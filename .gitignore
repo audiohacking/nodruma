@@ -1,6 +1,10 @@
-fixtures/
 build/
 output/
+fixtures/
+webapp/wasm/build/
+webapp/nodruma.js
+webapp/nodruma.wasm
+cmake-build-*/
 cmake-build-*/
 .cache/
 compile_commands.json
