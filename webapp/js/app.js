@@ -844,8 +844,17 @@
   const loopCropTrackLabel = document.getElementById("loop-crop-track-label");
   const inputLoopShift = document.getElementById("loop-shift");
   const inputLoopPitch = document.getElementById("loop-pitch");
+  const inputLoopVol = document.getElementById("loop-vol");
+  const inputLoopEqLow = document.getElementById("loop-eq-low");
+  const inputLoopEqHigh = document.getElementById("loop-eq-high");
+  const inputLoopReverb = document.getElementById("loop-reverb");
+  const inputLoopSync = document.getElementById("loop-sync");
+  const inputLoopPhraseSnap = document.getElementById("loop-phrase-snap");
   const btnShiftReset = document.getElementById("loop-shift-reset");
+  const btnShiftNudgeM = document.getElementById("loop-shift-nudge-m");
+  const btnShiftNudgeP = document.getElementById("loop-shift-nudge-p");
   const loopShiftMeta = document.getElementById("loop-shift-meta");
+  const loopSyncMeta = document.getElementById("loop-sync-meta");
 
   /** Pending crop region as 0..1 of current cycle (applied on handle release). */
   let cropStart01 = 0;
@@ -883,7 +892,8 @@
     if ((looper.getState().takeFrames || looper.getState().archiveFrames) <= 0) {
       return;
     }
-    looper.setTrim01(cropStart01, cropEnd01);
+    // Snap only when "Snap phrase" is on (and only on release)
+    looper.setTrim01(cropStart01, cropEnd01, { snap: !live });
     if (!live) cropPcmSig = -1;
   }
 
@@ -902,37 +912,62 @@
       cropPcmSig = sig;
     }
     if (!cropDrag) {
-      cropStart01 = st.trimStart01 ?? 0;
-      cropEnd01 = st.trimEnd01 ?? 1;
+      cropStart01 = st.regionStart01 ?? st.trimStart01 ?? 0;
+      cropEnd01 = st.regionEnd01 ?? st.trimEnd01 ?? 1;
     }
     updateCropSelUi();
 
     const t = st.tracks[sel];
-    if (t && inputLoopShift && inputLoopPitch) {
-      let shift01 = t.shift01 || 0;
-      if (shift01 > 0.5) shift01 -= 1;
-      const sliderVal = Math.round(shift01 * 100);
+    if (t) {
+      let shiftTenths = Math.round((t.shiftSigned01 || 0) * 1000);
       if (document.activeElement !== inputLoopShift) {
-        inputLoopShift.value = String(sliderVal);
+        inputLoopShift.value = String(shiftTenths);
       }
-      if (document.activeElement !== inputLoopPitch) {
-        inputLoopPitch.value = String(t.pitchSemitones || 0);
-      }
+      const setIfIdle = (el, v) => {
+        if (el && document.activeElement !== el) el.value = String(v);
+      };
+      setIfIdle(inputLoopPitch, t.pitchSemitones || 0);
+      setIfIdle(inputLoopVol, Math.round((t.volume ?? 1) * 100));
+      setIfIdle(inputLoopEqLow, t.eqLowDb || 0);
+      setIfIdle(inputLoopEqHigh, t.eqHighDb || 0);
+      setIfIdle(inputLoopReverb, Math.round((t.reverb || 0) * 100));
       if (loopShiftMeta) {
-        loopShiftMeta.textContent = `shift ${sliderVal}% · pitch ${
+        const signedMs = (t.shiftSigned01 || 0) * (st.cycleSec || 0) * 1000;
+        loopShiftMeta.textContent = `${signedMs >= 0 ? "+" : ""}${signedMs.toFixed(
+          1
+        )}ms · vol ${Math.round((t.volume ?? 1) * 100)}% · ${
           t.pitchSemitones || 0
         }st`;
       }
+    }
+    if (inputLoopSync && document.activeElement !== inputLoopSync) {
+      inputLoopSync.value = String(st.syncOffsetMs || 0);
+    }
+    if (inputLoopPhraseSnap) {
+      inputLoopPhraseSnap.checked = !!st.phraseSnap;
+    }
+    if (loopSyncMeta) {
+      const s = st.syncOffsetMs || 0;
+      loopSyncMeta.textContent = `sync ${s >= 0 ? "+" : ""}${s}ms`;
     }
 
     const sec = st.cycleSec.toFixed(2);
     const full = (st.takeSec || st.archiveSec || st.cycleSec).toFixed(2);
     const bars =
       st.bpm > 0 ? (st.cycleSec / ((60 / st.bpm) * 4)).toFixed(2) : "?";
+    const tiles = st.regionTiles || (t && t.tiles) || 1;
+    let tileNote = "";
+    if (tiles > 1.05) {
+      const nice =
+        Math.abs(tiles - Math.round(tiles)) < 0.08
+          ? `×${Math.round(tiles)}`
+          : `×${tiles.toFixed(1)}`;
+      tileNote = ` · phrase ${nice}`;
+    }
     loopCropMeta.textContent =
       takeN > st.cycleFrames
-        ? `loop ${sec}s / take ${full}s · ~${bars} bars`
-        : `${sec}s · ~${bars} bars @ ${st.bpm}`;
+        ? `cycle ${sec}s / take ${full}s · ~${bars} bars${tileNote}`
+        : `cycle ${sec}s · ~${bars} bars @ ${st.bpm}${tileNote}`;
   }
 
   function ensureLooperAnim() {
@@ -1274,8 +1309,21 @@
   if (inputLoopShift) {
     inputLoopShift.addEventListener("input", () => {
       const st = looper.getState();
-      const pct = Number(inputLoopShift.value) || 0;
-      looper.setTrackShift01(st.selectedTrack, pct / 100);
+      // Slider is tenths of a percent of cycle (−50%…+50%)
+      const tenths = Number(inputLoopShift.value) || 0;
+      looper.setTrackShift01(st.selectedTrack, tenths / 1000);
+    });
+  }
+  if (btnShiftNudgeM) {
+    btnShiftNudgeM.addEventListener("click", () => {
+      const st = looper.getState();
+      looper.nudgeTrackShiftMs(st.selectedTrack, -1);
+    });
+  }
+  if (btnShiftNudgeP) {
+    btnShiftNudgeP.addEventListener("click", () => {
+      const st = looper.getState();
+      looper.nudgeTrackShiftMs(st.selectedTrack, 1);
     });
   }
   if (inputLoopPitch) {
@@ -1284,11 +1332,55 @@
       looper.setTrackPitch(st.selectedTrack, inputLoopPitch.value);
     });
   }
+  if (inputLoopVol) {
+    inputLoopVol.addEventListener("input", () => {
+      const st = looper.getState();
+      looper.setTrackFx(st.selectedTrack, {
+        volume: (Number(inputLoopVol.value) || 0) / 100,
+      });
+    });
+  }
+  if (inputLoopEqLow) {
+    inputLoopEqLow.addEventListener("input", () => {
+      const st = looper.getState();
+      looper.setTrackFx(st.selectedTrack, { eqLowDb: inputLoopEqLow.value });
+    });
+  }
+  if (inputLoopEqHigh) {
+    inputLoopEqHigh.addEventListener("input", () => {
+      const st = looper.getState();
+      looper.setTrackFx(st.selectedTrack, { eqHighDb: inputLoopEqHigh.value });
+    });
+  }
+  if (inputLoopReverb) {
+    inputLoopReverb.addEventListener("input", () => {
+      const st = looper.getState();
+      looper.setTrackFx(st.selectedTrack, {
+        reverb: (Number(inputLoopReverb.value) || 0) / 100,
+      });
+    });
+  }
+  if (inputLoopSync) {
+    inputLoopSync.addEventListener("input", () => {
+      looper.setSyncOffsetMs(inputLoopSync.value);
+    });
+  }
+  if (inputLoopPhraseSnap) {
+    inputLoopPhraseSnap.addEventListener("change", () => {
+      looper.setPhraseSnap(inputLoopPhraseSnap.checked);
+    });
+  }
   if (btnShiftReset) {
     btnShiftReset.addEventListener("click", () => {
       const st = looper.getState();
       looper.setTrackShift(st.selectedTrack, 0);
-      looper.setTrackPitch(st.selectedTrack, 0);
+      looper.setTrackFx(st.selectedTrack, {
+        pitchSemitones: 0,
+        volume: 1,
+        eqLowDb: 0,
+        eqHighDb: 0,
+        reverb: 0,
+      });
     });
   }
 
@@ -1308,7 +1400,7 @@
   loopCropWrap.addEventListener("pointermove", (e) => {
     if (!cropDrag) return;
     const x = cropClientTo01(e.clientX);
-    const minGap = 0.02;
+    const minGap = 0.005;
     if (cropDrag === "start") {
       cropStart01 = Math.min(x, cropEnd01 - minGap);
     } else {

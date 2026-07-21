@@ -9,7 +9,7 @@
 const NODRUMA_SESSION_DB = "nodruma-session";
 const NODRUMA_SESSION_STORE = "kv";
 const NODRUMA_SESSION_KEY = "current";
-const NODRUMA_SESSION_VERSION = 2;
+const NODRUMA_SESSION_VERSION = 4;
 
 function openSessionDb() {
   return new Promise((resolve, reject) => {

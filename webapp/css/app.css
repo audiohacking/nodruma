@@ -942,8 +942,36 @@ body[data-screen="looper"] #btn-looper {
 }
 
 .loop-crop-shift-row input[type="range"] {
-  width: 8rem;
+  width: 6.5rem;
   accent-color: var(--amber);
+}
+
+.loop-fx-row .loop-field span,
+.loop-sync-row .loop-field span {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #8a8790);
+}
+
+.loop-nudge {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.loop-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted, #8a8790);
+  cursor: pointer;
+  user-select: none;
+}
+
+.loop-sync-row {
+  padding-top: 0.15rem;
+  border-top: 1px solid rgba(138, 135, 144, 0.2);
 }
 
 .loop-track.selected {

@@ -173,11 +173,11 @@
     <div id="loop-crop" class="loop-crop hidden">
       <div class="loop-crop-bar">
         <span class="loop-crop-label" id="loop-crop-track-label">Track 1</span>
-        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Halve selection">½</button>
-        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate cycle">×2</button>
-        <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Set selection start at playhead">Start here</button>
-        <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Set selection end at playhead">End here</button>
-        <button type="button" id="loop-crop-full" class="btn ghost tiny" title="Expand to full take">Full take</button>
+        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Halve master cycle (keeps phase)">½</button>
+        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Double master cycle">×2</button>
+        <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Set phrase start at playhead">Start here</button>
+        <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Set phrase end at playhead">End here</button>
+        <button type="button" id="loop-crop-full" class="btn ghost tiny" title="Use full take as phrase">Full take</button>
         <span id="loop-crop-meta" class="meta"></span>
       </div>
       <div class="loop-crop-wave-wrap" id="loop-crop-wave-wrap">
@@ -188,19 +188,50 @@
         </div>
         <div id="loop-crop-ph" class="loop-crop-ph"></div>
       </div>
-      <div class="loop-crop-shift-row">
+      <div class="loop-crop-shift-row loop-fx-row">
         <label class="loop-field">
           <span>Shift</span>
-          <input type="range" id="loop-shift" min="-50" max="50" value="0" step="1" />
+          <input type="range" id="loop-shift" min="-500" max="500" value="0" step="1" title="0.1% of cycle" />
+        </label>
+        <div class="loop-nudge">
+          <button type="button" id="loop-shift-nudge-m" class="btn ghost tiny" title="-1 ms">−1ms</button>
+          <button type="button" id="loop-shift-nudge-p" class="btn ghost tiny" title="+1 ms">+1ms</button>
+        </div>
+        <label class="loop-field">
+          <span>Vol</span>
+          <input type="range" id="loop-vol" min="0" max="150" value="100" step="1" />
         </label>
         <label class="loop-field">
           <span>Pitch</span>
           <input type="range" id="loop-pitch" min="-12" max="12" value="0" step="1" />
         </label>
-        <button type="button" id="loop-shift-reset" class="btn ghost tiny">Reset</button>
+        <label class="loop-field">
+          <span>Low</span>
+          <input type="range" id="loop-eq-low" min="-12" max="12" value="0" step="1" />
+        </label>
+        <label class="loop-field">
+          <span>High</span>
+          <input type="range" id="loop-eq-high" min="-12" max="12" value="0" step="1" />
+        </label>
+        <label class="loop-field">
+          <span>Verb</span>
+          <input type="range" id="loop-reverb" min="0" max="100" value="0" step="1" />
+        </label>
+        <button type="button" id="loop-shift-reset" class="btn ghost tiny">Flat</button>
         <span id="loop-shift-meta" class="meta"></span>
       </div>
-      <p class="hint">Click a track to edit it · drag handles to trim <em>or expand</em> · Shift aligns layers while playing</p>
+      <div class="loop-crop-shift-row loop-sync-row">
+        <label class="loop-field">
+          <span>Rec sync</span>
+          <input type="range" id="loop-sync" min="-80" max="80" value="0" step="1" title="Record alignment (ms)" />
+        </label>
+        <label class="loop-check">
+          <input type="checkbox" id="loop-phrase-snap" />
+          <span>Snap phrase</span>
+        </label>
+        <span id="loop-sync-meta" class="meta"></span>
+      </div>
+      <p class="hint">Overdubs lock to the shared clock as played · Shift is 0.1% steps (+/−1ms) · Snap phrase is optional · ½/×2 = master cycle</p>
     </div>
 
     <div class="looper-tracks" id="looper-tracks"></div>
