@@ -397,12 +397,13 @@
       }
     }
 
-    function triggerPad(pad, el) {
+    function triggerPad(pad, el, gain) {
       player.ensureCtx();
       player.play(pad.id, {
         pitchSemitones: pad.pitchSemitones ?? 0,
         eqLowDb: pad.eqLowDb ?? 0,
         eqHighDb: pad.eqHighDb ?? 0,
+        gain: gain == null ? 1 : gain,
       });
       if (el) {
         el.classList.add("flash");
@@ -832,6 +833,48 @@
     const el = samplerCol.padGrid.querySelector(`[data-slot="${slot}"]`);
     samplerCol.triggerPad(pad, el);
   });
+
+  // WebMIDI: C2–G♯2 → drums, C3+ → sampler pages
+  const btnMidi = document.getElementById("btn-midi");
+  const midi = createMidiController({
+    onStatus(msg, ok) {
+      btnMidi.textContent = msg.replace(/^MIDI · /, "MIDI · ");
+      btnMidi.title =
+        "C2–G♯2 = drums 1–9 · C3+ = sampler (16/page, chromatic)\n" + msg;
+      btnMidi.classList.toggle("midi-on", !!ok);
+      btnMidi.classList.toggle("midi-off", ok === false);
+    },
+    onNote(mapped, velocity) {
+      if (busy) return;
+      player.ensureCtx();
+      const gain = midiVelocityGain(velocity);
+      if (mapped.kind === "drums") {
+        const pad = drumsCol.padAtSlot(mapped.slot);
+        if (!pad) return;
+        const el = drumsCol.padGrid.querySelector(`[data-slot="${mapped.slot}"]`);
+        drumsCol.triggerPad(pad, el, gain);
+        return;
+      }
+      if (mapped.page != null && mapped.page !== samplerCol.bank) {
+        samplerCol.setBank(mapped.page);
+      }
+      const pad = samplerCol.padAtSlot(mapped.slot);
+      if (!pad) return;
+      const el = samplerCol.padGrid.querySelector(`[data-slot="${mapped.slot}"]`);
+      samplerCol.triggerPad(pad, el, gain);
+    },
+  });
+
+  btnMidi.addEventListener("click", async () => {
+    btnMidi.disabled = true;
+    await midi.enable();
+    btnMidi.disabled = false;
+  });
+
+  // Auto-try MIDI on load (may require click on some browsers)
+  if (navigator.requestMIDIAccess) {
+    midi.enable().catch(() => {});
+  }
 
   samplerCol.renderPads();
   drumsCol.renderPads();

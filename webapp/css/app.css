@@ -90,9 +90,16 @@ body > * {
   font-size: 0.72rem;
 }
 
-.export-menu {
-  position: relative;
+.midi-btn.midi-on {
+  border-color: var(--mint);
+  color: var(--mint);
 }
+
+.midi-btn.midi-off {
+  border-color: var(--rose);
+  color: var(--rose);
+}
+
 
 .export-dropdown {
   position: absolute;

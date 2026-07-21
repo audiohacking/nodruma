@@ -128,7 +128,7 @@ class PadPlayer {
 
   /**
    * @param {string} padId
-   * @param {{pitchSemitones?:number,eqLowDb?:number,eqHighDb?:number}} [fx]
+   * @param {{pitchSemitones?:number,eqLowDb?:number,eqHighDb?:number,gain?:number}} [fx]
    */
   play(padId, fx = {}) {
     const ctx = this.ensureCtx();
@@ -149,9 +149,14 @@ class PadPlayer {
     high.frequency.value = 4000;
     high.gain.value = fx.eqHighDb ?? 0;
 
+    const gain = ctx.createGain();
+    const g = fx.gain;
+    gain.gain.value = g == null ? 1 : Math.max(0, Math.min(1.5, g));
+
     src.connect(low);
     low.connect(high);
-    high.connect(ctx.destination);
+    high.connect(gain);
+    gain.connect(ctx.destination);
     src.start();
     return true;
   }
