@@ -423,6 +423,10 @@
 
     function triggerPad(pad, el, gain) {
       player.ensureCtx();
+      // Session restore can leave kit PCM without a player buffer — hydrate on demand
+      if (!player.hasSample(pad.id) && pad.pcm && pad.pcm.length) {
+        player.setSample(pad.id, pad.pcm, pad.sampleRate);
+      }
       player.play(pad.id, {
         pitchSemitones: pad.pitchSemitones ?? 0,
         eqLowDb: pad.eqLowDb ?? 0,
@@ -1016,20 +1020,25 @@
 
   function applyKitToPlayer(kit) {
     player.clear(kit.idPrefix);
+    let n = 0;
     for (const p of kit.pads) {
-      if (!p.discarded && p.pcm) player.setSample(p.id, p.pcm, p.sampleRate);
+      if (p.discarded || !p.pcm || !p.pcm.length) continue;
+      if (player.setSample(p.id, p.pcm, p.sampleRate)) n += 1;
     }
+    return n;
   }
 
   async function restoreSession() {
     sessionSaver.suspend(true);
     try {
       const data = await loadSession();
-      if (!data || data.v !== NODRUMA_SESSION_VERSION) return false;
+      if (!data) return false;
+      // Accept v1 (legacy TypedArray) and v2 (ArrayBuffer PCM)
+      if (data.v != null && data.v > NODRUMA_SESSION_VERSION) return false;
       if (data.drums) drums.loadSnapshot(data.drums);
       if (data.sampler) sampler.loadSnapshot(data.sampler);
-      applyKitToPlayer(drums);
-      applyKitToPlayer(sampler);
+      const loaded =
+        applyKitToPlayer(drums) + applyKitToPlayer(sampler);
       if (data.looper) looper.importSnapshot(data.looper);
       syncLooperFormFromState();
       if (data.ui) {
@@ -1037,6 +1046,11 @@
         if (typeof data.ui.samplerBank === "number") {
           samplerCol.setBank(data.ui.samplerBank);
         }
+      }
+      if (loaded === 0 && (drums.pads.length || sampler.pads.length)) {
+        console.warn(
+          "session restore: pads present but no audio buffers loaded — re-save after this fix"
+        );
       }
       return true;
     } catch (err) {

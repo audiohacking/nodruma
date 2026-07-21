@@ -786,7 +786,12 @@ function createLooper(deps) {
       tracks: tracks.map((t) => ({
         muted: !!t.muted,
         armed: !!t.armed,
-        pcm: t.pcm ? new Float32Array(t.pcm) : null,
+        pcm:
+          t.pcm && typeof pcmToArrayBuffer === "function"
+            ? pcmToArrayBuffer(t.pcm)
+            : t.pcm
+              ? t.pcm.slice().buffer
+              : null,
       })),
     };
   }
@@ -829,11 +834,15 @@ function createLooper(deps) {
       if (!src) continue;
       tracks[i].muted = !!src.muted;
       tracks[i].armed = !!src.armed;
-      if (src.pcm && src.pcm.length) {
-        const pcm =
-          src.pcm instanceof Float32Array
-            ? new Float32Array(src.pcm)
-            : new Float32Array(src.pcm);
+      const pcm =
+        typeof pcmFromStored === "function"
+          ? pcmFromStored(src.pcm)
+          : src.pcm instanceof Float32Array
+            ? src.pcm.slice()
+            : src.pcm
+              ? new Float32Array(src.pcm)
+              : null;
+      if (pcm && pcm.length) {
         tracks[i].pcm = pcm;
         if (!cycleFrames) cycleFrames = pcm.length;
       }

@@ -1,12 +1,15 @@
 /**
  * Persist drums + sampler + looper in IndexedDB across reloads.
  * Cleared only via Clear session (or when storage is wiped).
+ *
+ * PCM is stored as standalone ArrayBuffer copies — IDB Float32Array views
+ * can fail to feed AudioBuffers after reload if not copied out.
  */
 
 const NODRUMA_SESSION_DB = "nodruma-session";
 const NODRUMA_SESSION_STORE = "kv";
 const NODRUMA_SESSION_KEY = "current";
-const NODRUMA_SESSION_VERSION = 1;
+const NODRUMA_SESSION_VERSION = 2;
 
 function openSessionDb() {
   return new Promise((resolve, reject) => {
@@ -26,6 +29,41 @@ function openSessionDb() {
   });
 }
 
+/** Own ArrayBuffer copy of mono float PCM (safe for IDB). */
+function pcmToArrayBuffer(pcm) {
+  if (!pcm || !pcm.length) return null;
+  const src = pcm instanceof Float32Array ? pcm : new Float32Array(pcm);
+  return src.slice().buffer;
+}
+
+/** Restore Float32Array from IDB value (ArrayBuffer, view, or Float32Array). */
+function pcmFromStored(stored) {
+  if (!stored) return null;
+  try {
+    if (stored instanceof Float32Array) {
+      return stored.slice();
+    }
+    if (stored instanceof ArrayBuffer) {
+      return new Float32Array(stored.slice(0));
+    }
+    if (ArrayBuffer.isView(stored)) {
+      const bytes = stored.byteLength;
+      const ab = stored.buffer.slice(
+        stored.byteOffset,
+        stored.byteOffset + bytes
+      );
+      if (bytes % 4 === 0) return new Float32Array(ab);
+      return null;
+    }
+    if (Array.isArray(stored) && stored.length) {
+      return Float32Array.from(stored);
+    }
+  } catch (err) {
+    console.warn("pcmFromStored failed", err);
+  }
+  return null;
+}
+
 /**
  * @returns {Promise<object|null>}
  */
@@ -35,7 +73,20 @@ async function loadSession() {
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(NODRUMA_SESSION_STORE, "readonly");
       const req = tx.objectStore(NODRUMA_SESSION_STORE).get(NODRUMA_SESSION_KEY);
-      req.onsuccess = () => resolve(req.result || null);
+      req.onsuccess = () => {
+        const raw = req.result || null;
+        if (!raw) {
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(
+            typeof structuredClone === "function" ? structuredClone(raw) : raw
+          );
+        } catch {
+          resolve(raw);
+        }
+      };
       req.onerror = () => reject(req.error);
       tx.oncomplete = () => db.close();
     });
@@ -141,4 +192,6 @@ window.loadSession = loadSession;
 window.saveSession = saveSession;
 window.clearSession = clearSession;
 window.createSessionSaver = createSessionSaver;
+window.pcmToArrayBuffer = pcmToArrayBuffer;
+window.pcmFromStored = pcmFromStored;
 window.NODRUMA_SESSION_VERSION = NODRUMA_SESSION_VERSION;

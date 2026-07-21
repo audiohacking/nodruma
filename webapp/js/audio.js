@@ -127,13 +127,34 @@ class PadPlayer {
 
   setSample(padId, float32Mono, sampleRate) {
     const ctx = this.ensureCtx();
-    const n = float32Mono.length;
-    // Web Audio requires ~3000–768000 Hz depending on browser
-    const sr = Math.min(768000, Math.max(3000, Math.round(sampleRate || NODRUMA_DECODE_SR)));
-    const buf = ctx.createBuffer(1, Math.max(1, n), sr);
-    const ch = buf.getChannelData(0);
-    if (n > 0) ch.set(float32Mono.subarray(0, n));
-    this.buffers.set(padId, buf);
+    if (!float32Mono || !float32Mono.length) {
+      this.buffers.delete(padId);
+      return false;
+    }
+    // Always copy into a fresh Float32Array — IDB / shared views can be fragile
+    const src =
+      float32Mono instanceof Float32Array
+        ? float32Mono
+        : new Float32Array(float32Mono);
+    const n = src.length;
+    const sr = Math.min(
+      768000,
+      Math.max(3000, Math.round(sampleRate || NODRUMA_DECODE_SR))
+    );
+    try {
+      const buf = ctx.createBuffer(1, Math.max(1, n), sr);
+      buf.getChannelData(0).set(src.subarray(0, n));
+      this.buffers.set(padId, buf);
+      return true;
+    } catch (err) {
+      console.warn("setSample failed", padId, err);
+      return false;
+    }
+  }
+
+  /** True if this pad id has an AudioBuffer ready to play. */
+  hasSample(padId) {
+    return this.buffers.has(padId);
   }
 
   clear(prefix) {

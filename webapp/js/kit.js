@@ -193,7 +193,7 @@ class Kit {
     return zip.generateAsync({ type: "blob" });
   }
 
-  /** Snapshot for IndexedDB (Float32Array clones via structured clone). */
+  /** Snapshot for IndexedDB — PCM as owned ArrayBuffer (not live TypedArray views). */
   toSnapshot() {
     return {
       sourceName: this.sourceName,
@@ -209,7 +209,11 @@ class Kit {
         pitchSemitones: p.pitchSemitones ?? 0,
         eqLowDb: p.eqLowDb ?? 0,
         eqHighDb: p.eqHighDb ?? 0,
-        pcm: p.pcm,
+        pcm: typeof pcmToArrayBuffer === "function"
+          ? pcmToArrayBuffer(p.pcm)
+          : p.pcm && p.pcm.slice
+            ? p.pcm.slice().buffer
+            : null,
       })),
     };
   }
@@ -226,10 +230,14 @@ class Kit {
     this.sourceName = snap.sourceName || this.exportName;
     this._seq = snap.seq || 0;
     for (const p of snap.pads || []) {
-      let pcm = p.pcm;
-      if (pcm && !(pcm instanceof Float32Array)) {
-        pcm = new Float32Array(pcm);
-      }
+      const pcm =
+        typeof pcmFromStored === "function"
+          ? pcmFromStored(p.pcm)
+          : p.pcm instanceof Float32Array
+            ? p.pcm.slice()
+            : p.pcm
+              ? new Float32Array(p.pcm)
+              : null;
       if (!pcm || !pcm.length) continue;
       this.pads.push({
         id: p.id,
@@ -245,7 +253,6 @@ class Kit {
         eqHighDb: p.eqHighDb ?? 0,
       });
     }
-    // Keep seq ahead of any restored ids
     let maxSeq = this._seq;
     for (const p of this.pads) {
       const m = String(p.id).match(/(\d+)$/);
