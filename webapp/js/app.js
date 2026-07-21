@@ -894,12 +894,9 @@
           ? `${Math.min(100, Math.round(t.peak * 140))}%`
           : "0%";
       }
-      // Redraw waveform when buffer identity/length changes (not every peak tick)
-      const sig = t.pcm ? t.pcm.length : 0;
-      if (waveDrawn[i] !== sig) {
-        drawLooperWaveform(waveCanvases[i], t.pcm, null);
-        waveDrawn[i] = sig;
-      }
+      // onChange only — redraw so overdubs show up even when length is unchanged
+      drawLooperWaveform(waveCanvases[i], t.pcm, null);
+      waveDrawn[i] = t.pcm ? t.pcm.length : 0;
     });
 
     tickLooperPlayhead();
