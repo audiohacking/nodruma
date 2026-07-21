@@ -202,6 +202,7 @@
         leftBtn.type = "button";
         leftBtn.className = "btn tiny";
         leftBtn.textContent = "◀";
+        leftBtn.title = "Move earlier";
         leftBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (kit.nudge(pad.id, -1)) renderPads();
@@ -211,6 +212,7 @@
         rightBtn.type = "button";
         rightBtn.className = "btn tiny";
         rightBtn.textContent = "▶";
+        rightBtn.title = "Move later";
         rightBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (kit.nudge(pad.id, 1)) renderPads();
@@ -226,10 +228,23 @@
           triggerPad(pad, el);
         });
 
+        const fxBtn = document.createElement("button");
+        fxBtn.type = "button";
+        fxBtn.className = "btn tiny";
+        fxBtn.textContent = "FX";
+        fxBtn.title = "Pitch / EQ / clone";
+        fxBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const open = el.classList.contains("fx-open");
+          padGrid.querySelectorAll(".pad.fx-open").forEach((n) => n.classList.remove("fx-open"));
+          if (!open) el.classList.add("fx-open");
+        });
+
         const discardBtn = document.createElement("button");
         discardBtn.type = "button";
         discardBtn.className = "btn tiny danger";
         discardBtn.textContent = "×";
+        discardBtn.title = "Discard";
         discardBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           kit.discard(pad.id);
@@ -237,11 +252,116 @@
           renderPads();
         });
 
-        actions.append(leftBtn, rightBtn, playBtn, discardBtn);
+        actions.append(leftBtn, rightBtn, playBtn, fxBtn, discardBtn);
         el.appendChild(actions);
 
+        const fx = document.createElement("div");
+        fx.className = "pad-fx";
+        fx.addEventListener("click", (e) => e.stopPropagation());
+        fx.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          el.draggable = false;
+        });
+
+        const sliders = [];
+        const mkSlider = (label, key, min, max, step, unit) => {
+          const row = document.createElement("label");
+          row.className = "fx-row";
+          const lab = document.createElement("span");
+          lab.textContent = label;
+          const input = document.createElement("input");
+          input.type = "range";
+          input.min = String(min);
+          input.max = String(max);
+          input.step = String(step);
+          input.value = String(pad[key] ?? 0);
+          const val = document.createElement("span");
+          val.className = "fx-val";
+          const syncVal = () => {
+            const n = Number(input.value);
+            val.textContent = `${n > 0 ? "+" : ""}${n}${unit}`;
+          };
+          syncVal();
+          input.addEventListener("input", () => {
+            const n = Number(input.value);
+            kit.setFx(pad.id, { [key]: n });
+            pad[key] = n;
+            syncVal();
+          });
+          input.addEventListener("change", () => triggerPad(pad, el));
+          row.append(lab, input, val);
+          sliders.push({ input, syncVal });
+          return row;
+        };
+
+        fx.appendChild(mkSlider("Pitch", "pitchSemitones", -12, 12, 1, "st"));
+        fx.appendChild(mkSlider("Low", "eqLowDb", -12, 12, 1, "dB"));
+        fx.appendChild(mkSlider("High", "eqHighDb", -12, 12, 1, "dB"));
+
+        const fxBtns = document.createElement("div");
+        fxBtns.className = "fx-btns";
+
+        const resetFx = document.createElement("button");
+        resetFx.type = "button";
+        resetFx.className = "btn tiny";
+        resetFx.textContent = "Flat";
+        resetFx.addEventListener("click", (e) => {
+          e.stopPropagation();
+          kit.setFx(pad.id, { pitchSemitones: 0, eqLowDb: 0, eqHighDb: 0 });
+          pad.pitchSemitones = 0;
+          pad.eqLowDb = 0;
+          pad.eqHighDb = 0;
+          for (const s of sliders) {
+            s.input.value = "0";
+            s.syncVal();
+          }
+          triggerPad(pad, el);
+        });
+
+        const cloneNext = document.createElement("button");
+        cloneNext.type = "button";
+        cloneNext.className = "btn tiny";
+        cloneNext.textContent = "Clone next";
+        cloneNext.title = "Duplicate after this pad";
+        cloneNext.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const copy = kit.clonePad(pad.id, "next");
+          if (copy) {
+            player.setSample(copy.id, copy.pcm, copy.sampleRate);
+            renderPads();
+          }
+        });
+
+        const cloneEnd = document.createElement("button");
+        cloneEnd.type = "button";
+        cloneEnd.className = "btn tiny";
+        cloneEnd.textContent = "Clone end";
+        cloneEnd.title = "Duplicate at end of kit";
+        cloneEnd.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const copy = kit.clonePad(pad.id, "end");
+          if (copy) {
+            player.setSample(copy.id, copy.pcm, copy.sampleRate);
+            renderPads();
+          }
+        });
+
+        const closeFx = document.createElement("button");
+        closeFx.type = "button";
+        closeFx.className = "btn tiny";
+        closeFx.textContent = "Done";
+        closeFx.addEventListener("click", (e) => {
+          e.stopPropagation();
+          el.classList.remove("fx-open");
+          el.draggable = true;
+        });
+
+        fxBtns.append(resetFx, cloneNext, cloneEnd, closeFx);
+        fx.appendChild(fxBtns);
+        el.appendChild(fx);
+
         el.addEventListener("click", (e) => {
-          if (e.target.closest("input, button, .pad-actions")) return;
+          if (e.target.closest("input, button, .pad-actions, .pad-fx")) return;
           if (Date.now() < suppressPlayUntil) return;
           triggerPad(pad, el);
         });
