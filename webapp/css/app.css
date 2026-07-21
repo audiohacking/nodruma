@@ -182,11 +182,63 @@ body > * {
   gap: var(--gap);
 }
 
-.column.has-kit .dropzone {
-  /* stay compact once pads are showing */
-  min-height: 5.5rem;
-  max-height: 7rem;
+.column.has-kit .dropzone.cropping {
+  min-height: 14rem;
+  max-height: none;
 }
+
+.crop-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.crop-title {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crop-file {
+  color: var(--text);
+}
+
+.crop-wave {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--steel);
+  background: #0f1014;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.crop-meta {
+  font-size: 0.7rem;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.sampler-col .crop-meta {
+  color: var(--violet);
+}
+
+.crop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.crop-actions .btn {
+  min-width: 5.5rem;
+}
+
 
 .panel {
   width: 100%;
@@ -206,8 +258,17 @@ body > * {
   min-height: 6.5rem;
   max-height: 8.5rem;
   padding: 0.75rem 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, max-height 0.2s;
   touch-action: manipulation;
+}
+
+.dropzone.cropping {
+  cursor: default;
+  min-height: 14rem;
+  max-height: none;
+  height: auto;
+  place-items: stretch;
+  padding: 0.75rem;
 }
 
 .dropzone:hover,

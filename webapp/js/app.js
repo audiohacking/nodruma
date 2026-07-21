@@ -286,10 +286,16 @@
       }
     }
 
-    async function ingestSource(file, progressBase, progressSpan, labelPrefix) {
-      const { mono, sampleRate } = await decodeFile(file);
+    async function ingestSource(file, progressBase, progressSpan, labelPrefix, crop) {
+      setProgress(progressBase + progressSpan * 0.05, `${labelPrefix} decoding…`);
+      await yieldToUi();
+      const decoded = await decodeFile(file);
+      let { mono, sampleRate } = decoded;
+      if (crop) {
+        mono = sliceMono(mono, sampleRate, crop);
+      }
       setProgress(
-        progressBase + progressSpan * 0.2,
+        progressBase + progressSpan * 0.25,
         `${labelPrefix} ${mode === "sampler" ? "chopping" : "splitting"}…`
       );
       await yieldToUi();
@@ -331,7 +337,7 @@
           const p = toRebuild[i];
           const t = (i + 1) / Math.max(1, toRebuild.length);
           setProgress(
-            progressBase + progressSpan * (0.35 + 0.65 * t),
+            progressBase + progressSpan * (0.4 + 0.6 * t),
             `${labelPrefix} recreating ${p.kind}…`
           );
           await yieldToUi();
@@ -360,6 +366,27 @@
       if (!api) return;
 
       const append = !!opts.append && kit.pads.length > 0;
+
+      // Crop UI first (not busy yet) so Cancel doesn't leave a half-processed kit
+      /** @type {Array<{file:File,crop:{startSec:number,endSec:number}}>} */
+      const queue = [];
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const crop = await cropAudioInDropzone(dropzone, file, {
+          accent:
+            mode === "sampler"
+              ? "rgba(180, 154, 212, 0.35)"
+              : "rgba(232, 160, 74, 0.35)",
+          confirmLabel: mode === "sampler" ? "Chop this" : "Split this",
+        });
+        if (!crop) {
+          // cancelled — skip this file
+          continue;
+        }
+        queue.push({ file, crop });
+      }
+      if (!queue.length) return;
+
       busy = true;
       cfg.activeBusy = true;
       setBusyGlobal(true);
@@ -368,21 +395,19 @@
       try {
         if (!append) {
           player.clear(kit.idPrefix);
-          kit.reset(list.length === 1 ? list[0].name : kit.exportName);
+          kit.reset(queue.length === 1 ? queue[0].file.name : kit.exportName);
           bank = 0;
-        } else if (list.length > 1) {
+        } else if (queue.length > 1) {
           kit.sourceName = kit.exportName;
         }
 
-        for (let i = 0; i < list.length; i++) {
-          const file = list[i];
-          const base = i / list.length;
-          const span = 1 / list.length;
+        for (let i = 0; i < queue.length; i++) {
+          const { file, crop } = queue[i];
+          const base = i / queue.length;
+          const span = 1 / queue.length;
           const prefix =
-            list.length > 1 ? `[${i + 1}/${list.length}] ${file.name}` : file.name;
-          setProgress(base, `${prefix} — decoding…`);
-          await yieldToUi();
-          await ingestSource(file, base, span, prefix);
+            queue.length > 1 ? `[${i + 1}/${queue.length}] ${file.name}` : file.name;
+          await ingestSource(file, base, span, prefix, crop);
           renderPads();
         }
 
