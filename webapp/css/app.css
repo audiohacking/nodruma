@@ -844,6 +844,96 @@ body[data-screen="looper"] #btn-looper {
   will-change: transform;
 }
 
+.loop-crop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--bg1);
+  border: 1px solid var(--steel);
+}
+
+.loop-crop.hidden {
+  display: none;
+}
+
+.loop-crop-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.loop-crop-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+  font-size: 1.1rem;
+  color: var(--amber);
+  margin-right: 0.25rem;
+}
+
+.loop-crop-wave-wrap {
+  position: relative;
+  height: 56px;
+  touch-action: none;
+  user-select: none;
+}
+
+.loop-crop-wave {
+  display: block;
+  width: 100%;
+  height: 56px;
+  border-radius: 2px;
+}
+
+.loop-crop-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0%;
+  right: 0%;
+  background: rgba(232, 160, 74, 0.12);
+  border-left: 2px solid var(--amber);
+  border-right: 2px solid var(--amber);
+  pointer-events: none;
+}
+
+.loop-crop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(232, 160, 74, 0.35) 40%,
+    rgba(232, 160, 74, 0.35) 60%,
+    transparent 100%
+  );
+}
+
+.loop-crop-handle-start {
+  left: 0;
+}
+
+.loop-crop-handle-end {
+  left: 100%;
+}
+
+.loop-crop-ph {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--mint);
+  pointer-events: none;
+  left: 0%;
+}
+
 .looper-tracks {
   display: flex;
   flex-direction: column;

@@ -133,13 +133,13 @@
         <h2>Looper</h2>
         <p class="col-sub">Stack pad takes · survives kit Reset</p>
       </div>
-      <p class="hint looper-hint">Set bars + BPM · Arm · Rec · play pads · Rec closes · <kbd>R</kbd> / <kbd>Space</kbd></p>
+      <p class="hint looper-hint">Rec open · Rec or Stop closes first take · trim cycle · then overdub (auto length)</p>
     </header>
 
     <div class="looper-transport" id="looper-transport">
       <button type="button" id="loop-play" class="btn primary" title="Play (Space)">Play</button>
-      <button type="button" id="loop-stop" class="btn ghost" title="Stop">Stop</button>
-      <button type="button" id="loop-rec" class="btn ghost loop-rec-btn" title="Record / overdub (R)">Rec</button>
+      <button type="button" id="loop-stop" class="btn ghost" title="Close take if recording, then stop">Stop</button>
+      <button type="button" id="loop-rec" class="btn ghost loop-rec-btn" title="Record / close take (R)">Rec</button>
       <label class="loop-field">
         <span>BPM</span>
         <input type="number" id="loop-bpm" min="40" max="240" value="120" />
@@ -147,18 +147,18 @@
       <label class="loop-field">
         <span>Quantize</span>
         <select id="loop-quantize">
-          <option value="off">Off</option>
+          <option value="off" selected>Off</option>
           <option value="beat">Beat</option>
-          <option value="bar" selected>Bar</option>
+          <option value="bar">Bar</option>
         </select>
       </label>
       <label class="loop-field">
         <span>Bars</span>
         <select id="loop-bars">
-          <option value="0">Free</option>
+          <option value="0" selected>Free</option>
           <option value="1">1</option>
           <option value="2">2</option>
-          <option value="4" selected>4</option>
+          <option value="4">4</option>
           <option value="8">8</option>
         </select>
       </label>
@@ -168,6 +168,26 @@
 
     <div class="looper-playhead-wrap" aria-hidden="true">
       <div id="loop-playhead" class="looper-playhead"></div>
+    </div>
+
+    <div id="loop-crop" class="loop-crop hidden">
+      <div class="loop-crop-bar">
+        <span class="loop-crop-label">Cycle</span>
+        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Keep first half">½</button>
+        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate length">×2</button>
+        <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Crop start to playhead">Start here</button>
+        <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Crop end to playhead">End here</button>
+        <span id="loop-crop-meta" class="meta"></span>
+      </div>
+      <div class="loop-crop-wave-wrap" id="loop-crop-wave-wrap">
+        <canvas id="loop-crop-wave" class="loop-crop-wave" width="900" height="56"></canvas>
+        <div id="loop-crop-sel" class="loop-crop-sel">
+          <div class="loop-crop-handle loop-crop-handle-start" data-handle="start"></div>
+          <div class="loop-crop-handle loop-crop-handle-end" data-handle="end"></div>
+        </div>
+        <div id="loop-crop-ph" class="loop-crop-ph"></div>
+      </div>
+      <p class="hint">Drag handles to trim · <strong>End here</strong> while playing locks length for other tracks</p>
     </div>
 
     <div class="looper-tracks" id="looper-tracks"></div>

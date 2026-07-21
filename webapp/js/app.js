@@ -826,6 +826,22 @@
   const selectLoopQuantize = document.getElementById("loop-quantize");
   const selectLoopBars = document.getElementById("loop-bars");
   const btnLoopClearAll = document.getElementById("loop-clear-all");
+  const loopCrop = document.getElementById("loop-crop");
+  const loopCropWave = document.getElementById("loop-crop-wave");
+  const loopCropSel = document.getElementById("loop-crop-sel");
+  const loopCropPh = document.getElementById("loop-crop-ph");
+  const loopCropMeta = document.getElementById("loop-crop-meta");
+  const loopCropWrap = document.getElementById("loop-crop-wave-wrap");
+  const btnCropHalve = document.getElementById("loop-crop-halve");
+  const btnCropDouble = document.getElementById("loop-crop-double");
+  const btnCropStartHere = document.getElementById("loop-crop-start-here");
+  const btnCropEndHere = document.getElementById("loop-crop-end-here");
+
+  /** Pending crop region as 0..1 of current cycle (applied on handle release). */
+  let cropStart01 = 0;
+  let cropEnd01 = 1;
+  let cropDrag = null; // 'start' | 'end' | null
+  let cropPcmSig = -1;
 
   document.body.dataset.screen = "pads";
 
@@ -840,6 +856,48 @@
     const x = st.phase01 * 100;
     loopPlayhead.style.left = `${x}%`;
     loopPlayhead.style.transform = "translateX(-50%)";
+    if (loopCropPh && !loopCrop.classList.contains("hidden")) {
+      loopCropPh.style.left = `${x}%`;
+    }
+  }
+
+  function updateCropSelUi() {
+    const left = cropStart01 * 100;
+    const right = (1 - cropEnd01) * 100;
+    loopCropSel.style.left = `${left}%`;
+    loopCropSel.style.right = `${right}%`;
+  }
+
+  function applyCropRegion() {
+    const st = looper.getState();
+    if (st.cycleFrames <= 0) return;
+    const a = Math.round(cropStart01 * st.cycleFrames);
+    const b = Math.round(cropEnd01 * st.cycleFrames);
+    if (a <= 0 && b >= st.cycleFrames) return;
+    if (looper.cropCycle(a, b)) {
+      cropStart01 = 0;
+      cropEnd01 = 1;
+      cropPcmSig = -1;
+    }
+  }
+
+  function syncCropPanel(st) {
+    const has = st.cycleFrames > 0 && st.masterPcm;
+    loopCrop.classList.toggle("hidden", !has);
+    if (!has) return;
+
+    const sig = st.masterPcm.length;
+    if (sig !== cropPcmSig) {
+      drawLooperWaveform(loopCropWave, st.masterPcm, null);
+      cropPcmSig = sig;
+      cropStart01 = 0;
+      cropEnd01 = 1;
+    }
+    updateCropSelUi();
+    const sec = st.cycleSec.toFixed(2);
+    const bars =
+      st.bpm > 0 ? (st.cycleSec / ((60 / st.bpm) * 4)).toFixed(2) : "?";
+    loopCropMeta.textContent = `${sec}s · ~${bars} bars @ ${st.bpm}`;
   }
 
   function ensureLooperAnim() {
@@ -924,6 +982,7 @@
     });
 
     tickLooperPlayhead();
+    syncCropPanel(st);
   }
 
   const looper = createLooper({
@@ -1141,6 +1200,61 @@
   selectLoopBars.addEventListener("change", () => {
     looper.setBarsPreset(selectLoopBars.value);
     noteKitChanged();
+  });
+
+  btnCropHalve.addEventListener("click", () => {
+    looper.halveCycle();
+  });
+  btnCropDouble.addEventListener("click", () => {
+    looper.doubleCycle();
+  });
+  btnCropEndHere.addEventListener("click", () => {
+    player.ensureCtx();
+    if (!looper.getState().playing) looper.play();
+    looper.setCycleEndAtPlayhead();
+  });
+  btnCropStartHere.addEventListener("click", () => {
+    player.ensureCtx();
+    if (!looper.getState().playing) looper.play();
+    looper.setCycleStartAtPlayhead();
+  });
+
+  function cropClientTo01(clientX) {
+    const rect = loopCropWrap.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }
+
+  loopCropWrap.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest("[data-handle]");
+    if (!handle) return;
+    e.preventDefault();
+    cropDrag = handle.dataset.handle;
+    loopCropWrap.setPointerCapture(e.pointerId);
+  });
+  loopCropWrap.addEventListener("pointermove", (e) => {
+    if (!cropDrag) return;
+    const x = cropClientTo01(e.clientX);
+    const minGap = 0.02;
+    if (cropDrag === "start") {
+      cropStart01 = Math.min(x, cropEnd01 - minGap);
+    } else {
+      cropEnd01 = Math.max(x, cropStart01 + minGap);
+    }
+    updateCropSelUi();
+  });
+  loopCropWrap.addEventListener("pointerup", (e) => {
+    if (!cropDrag) return;
+    cropDrag = null;
+    try {
+      loopCropWrap.releasePointerCapture(e.pointerId);
+    } catch {
+      /* */
+    }
+    applyCropRegion();
+  });
+  loopCropWrap.addEventListener("pointercancel", () => {
+    cropDrag = null;
   });
 
   // Keyboard: digits → drums, QWERTY → sampler, PgUp/Dn → banks;

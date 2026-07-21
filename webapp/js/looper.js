@@ -45,9 +45,9 @@ function createLooper(deps) {
 
   let bpm = 120;
   /** @type {'off'|'beat'|'bar'} */
-  let quantize = "bar";
-  /** @type {0|1|2|4|8} 0 = free first take */
-  let barsPreset = 4;
+  let quantize = "off";
+  /** @type {0|1|2|4|8} 0 = free first take — trim after */
+  let barsPreset = 0;
   let playing = false;
   let cycleFrames = 0;
   let sampleRate = 44100;
@@ -506,10 +506,129 @@ function createLooper(deps) {
   }
 
   function stop() {
-    cancelRecording();
+    // Stop while recording closes the take (does not discard) — then stops transport.
+    // Rec = close & keep rolling; Stop = close & stop.
+    if (recTrack >= 0) {
+      finishRecording();
+    }
     playing = false;
     stopTrackSources();
     emit();
+  }
+
+  function minCycleFrames() {
+    return Math.max(
+      Math.floor(sampleRate * 0.25),
+      Math.floor(beatSec() * sampleRate * 0.5)
+    );
+  }
+
+  /**
+   * Trim all tracks to [startFrame, endFrame). Sets the master cycle length
+   * that later overdubs auto-stop on.
+   */
+  function cropCycle(startFrame, endFrame) {
+    if (cycleFrames <= 0) return false;
+    let a = Math.max(0, Math.floor(Number(startFrame) || 0));
+    let b = Math.min(cycleFrames, Math.floor(Number(endFrame) || 0));
+    if (b <= a) return false;
+    const minN = minCycleFrames();
+    if (b - a < minN) {
+      b = Math.min(cycleFrames, a + minN);
+      if (b - a < minN) {
+        a = Math.max(0, b - minN);
+      }
+    }
+    if (b - a < 64) return false;
+
+    const len = b - a;
+    for (const t of tracks) {
+      if (!t.pcm || !t.pcm.length) continue;
+      const next = new Float32Array(len);
+      const srcStart = Math.min(a, t.pcm.length);
+      const copyLen = Math.max(0, Math.min(len, t.pcm.length - srcStart));
+      if (copyLen > 0) next.set(t.pcm.subarray(srcStart, srcStart + copyLen));
+      applySeamCrossfade(next);
+      t.pcm = next;
+      if (t.source) {
+        try {
+          t.source.stop();
+        } catch {
+          /* */
+        }
+        t.source = null;
+      }
+    }
+    cycleFrames = len;
+    const ctx = deps.getCtx();
+    if (playing) {
+      cycleOrigin = ctx.currentTime;
+      restartAllSources(ctx.currentTime);
+    }
+    emit();
+    return true;
+  }
+
+  /** Crop end to the current playhead (keep start). Great for free-length first takes. */
+  function setCycleEndAtPlayhead() {
+    if (cycleFrames <= 0) return false;
+    const ctx = deps.getCtx();
+    if (!playing) return false;
+    const end = phaseFrames(ctx.currentTime);
+    if (end < minCycleFrames()) return false;
+    return cropCycle(0, end);
+  }
+
+  /** Crop start to the current playhead (keep end) — fix late count-in. */
+  function setCycleStartAtPlayhead() {
+    if (cycleFrames <= 0 || !playing) return false;
+    const start = phaseFrames(deps.getCtx().currentTime);
+    if (cycleFrames - start < minCycleFrames()) return false;
+    return cropCycle(start, cycleFrames);
+  }
+
+  function halveCycle() {
+    if (cycleFrames < minCycleFrames() * 2) return false;
+    return cropCycle(0, Math.floor(cycleFrames / 2));
+  }
+
+  function doubleCycle() {
+    if (cycleFrames <= 0) return false;
+    if (cycleFrames * 2 > maxFrames()) return false;
+    const len = cycleFrames;
+    for (const t of tracks) {
+      if (!t.pcm || !t.pcm.length) continue;
+      const next = new Float32Array(len * 2);
+      const chunk = t.pcm.subarray(0, Math.min(t.pcm.length, len));
+      next.set(chunk, 0);
+      next.set(chunk, len);
+      applySeamCrossfade(next);
+      t.pcm = next;
+      if (t.source) {
+        try {
+          t.source.stop();
+        } catch {
+          /* */
+        }
+        t.source = null;
+      }
+    }
+    cycleFrames = len * 2;
+    const ctx = deps.getCtx();
+    if (playing) {
+      cycleOrigin = ctx.currentTime;
+      restartAllSources(ctx.currentTime);
+    }
+    emit();
+    return true;
+  }
+
+  /** Reference waveform for the crop UI (first track with audio). */
+  function masterPcm() {
+    for (const t of tracks) {
+      if (t.pcm && t.pcm.length) return t.pcm;
+    }
+    return null;
   }
 
   function toggleRec() {
@@ -648,6 +767,7 @@ function createLooper(deps) {
         if (cycleFrames <= 0 || !playing) return 0;
         return phaseFrames(deps.getCtx().currentTime) / cycleFrames;
       })(),
+      masterPcm: masterPcm(),
     };
   }
 
@@ -762,6 +882,11 @@ function createLooper(deps) {
     toggleMute,
     clear,
     clearAll,
+    cropCycle,
+    setCycleEndAtPlayhead,
+    setCycleStartAtPlayhead,
+    halveCycle,
+    doubleCycle,
     setUiVisible,
     exportSnapshot,
     importSnapshot,
