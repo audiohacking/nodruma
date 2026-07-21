@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>nodruma — sampler + drum replicator</title>
+  <title>nodruma — drums + sampler</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
@@ -31,55 +31,12 @@
   </header>
 
   <nav class="mobile-tabs" id="mobile-tabs" aria-label="Workspace">
-    <button type="button" class="tab-btn active" data-tab="sampler">Sampler</button>
-    <button type="button" class="tab-btn" data-tab="drums">Drums</button>
+    <button type="button" class="tab-btn active" data-tab="drums">Drums</button>
+    <button type="button" class="tab-btn" data-tab="sampler">Sampler</button>
   </nav>
 
   <main class="workspace" id="workspace">
-    <!-- LEFT: generic sample chopper -->
-    <section class="column sampler-col" id="col-sampler" data-col="sampler">
-      <header class="col-head">
-        <h2>Sampler</h2>
-        <p class="col-sub">QWERTY chops · no recreate</p>
-        <div class="col-actions">
-          <button type="button" id="btn-s-load" class="btn ghost">Load</button>
-          <button type="button" id="btn-s-add" class="btn ghost" disabled>Add</button>
-          <button type="button" id="btn-s-reset" class="btn ghost danger" disabled>Reset</button>
-        </div>
-      </header>
-
-      <div class="deck-bar hidden" id="s-deck-bar">
-        <div class="bank-ctrl">
-          <button type="button" id="s-bank-prev" class="btn ghost bank-btn" aria-label="Previous page">◀</button>
-          <span id="s-bank-label" class="bank-label">PAGE 1</span>
-          <button type="button" id="s-bank-next" class="btn ghost bank-btn" aria-label="Next page">▶</button>
-        </div>
-        <p class="hint"><kbd>QWER</kbd>… · MIDI C3+ · FX · swipe</p>
-      </div>
-
-      <div class="stage-panels">
-        <section id="s-dropzone" class="dropzone panel" tabindex="0" aria-label="Drop audio to chop">
-          <div class="drop-inner">
-            <p class="drop-title">Chop samples</p>
-            <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A</p>
-            <p class="drop-pipe">Pick a slice, then chop → QWERTY</p>
-          </div>
-          <div id="s-progress" class="progress hidden">
-            <div class="progress-bar"><div id="s-progress-fill"></div></div>
-            <p id="s-progress-label">Working…</p>
-          </div>
-          <input type="file" id="s-file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
-        </section>
-        <div id="s-pad-grid" class="pad-grid sampler-grid panel hidden" role="group" aria-label="Sampler pads"></div>
-      </div>
-
-      <aside class="legend hidden" id="s-legend">
-        <span class="pill chop">chop</span>
-        <span id="s-pad-stats" class="meta"></span>
-      </aside>
-    </section>
-
-    <!-- RIGHT: drum replicator -->
+    <!-- LEFT: drum replicator (MIDI C2) -->
     <section class="column drums-col" id="col-drums" data-col="drums">
       <header class="col-head">
         <h2>Drums</h2>
@@ -122,6 +79,49 @@
         <span class="pill hat">hat</span>
         <span class="pill unknown">unknown</span>
         <span id="d-pad-stats" class="meta"></span>
+      </aside>
+    </section>
+
+    <!-- RIGHT: generic sample chopper (MIDI C3+) -->
+    <section class="column sampler-col" id="col-sampler" data-col="sampler">
+      <header class="col-head">
+        <h2>Sampler</h2>
+        <p class="col-sub">QWERTY chops · no recreate</p>
+        <div class="col-actions">
+          <button type="button" id="btn-s-load" class="btn ghost">Load</button>
+          <button type="button" id="btn-s-add" class="btn ghost" disabled>Add</button>
+          <button type="button" id="btn-s-reset" class="btn ghost danger" disabled>Reset</button>
+        </div>
+      </header>
+
+      <div class="deck-bar hidden" id="s-deck-bar">
+        <div class="bank-ctrl">
+          <button type="button" id="s-bank-prev" class="btn ghost bank-btn" aria-label="Previous page">◀</button>
+          <span id="s-bank-label" class="bank-label">PAGE 1</span>
+          <button type="button" id="s-bank-next" class="btn ghost bank-btn" aria-label="Next page">▶</button>
+        </div>
+        <p class="hint"><kbd>QWER</kbd>… · MIDI C3+ · FX · swipe</p>
+      </div>
+
+      <div class="stage-panels">
+        <section id="s-dropzone" class="dropzone panel" tabindex="0" aria-label="Drop audio to chop">
+          <div class="drop-inner">
+            <p class="drop-title">Chop samples</p>
+            <p class="drop-sub">WAV · MP3 · OGG · FLAC · M4A</p>
+            <p class="drop-pipe">Pick a slice, then chop → QWERTY</p>
+          </div>
+          <div id="s-progress" class="progress hidden">
+            <div class="progress-bar"><div id="s-progress-fill"></div></div>
+            <p id="s-progress-label">Working…</p>
+          </div>
+          <input type="file" id="s-file-input" accept="audio/*,.wav,.wave,.aif,.aiff,.mp3,.ogg,.oga,.flac,.m4a,.aac,.opus,.webm,.caf" multiple hidden />
+        </section>
+        <div id="s-pad-grid" class="pad-grid sampler-grid panel hidden" role="group" aria-label="Sampler pads"></div>
+      </div>
+
+      <aside class="legend hidden" id="s-legend">
+        <span class="pill chop">chop</span>
+        <span id="s-pad-stats" class="meta"></span>
       </aside>
     </section>
   </main>

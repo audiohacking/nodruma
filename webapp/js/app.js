@@ -759,7 +759,7 @@
       });
     });
   });
-  workspace.dataset.tab = "sampler";
+  workspace.dataset.tab = "drums";
 
   // Export menu
   btnExport.addEventListener("click", (e) => {

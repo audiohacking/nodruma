@@ -34,11 +34,11 @@ Binary: `./build/nodruma`
 
 ## Live demo (WASM)
 
-Browser MPC kit builder under [`webapp/`](webapp/): **left** = generic QWERTY
-sample chopper; **right** = drum split / classify / recreate (pads `1–9`).
-Decode at 44.1 kHz; crop a slice before process. WebMIDI: **C2–G♯2** → drums,
-**C3+** → sampler pages. Header **Looper** stacks pad takes into independent
-loop tracks (survives kit Reset). Export drums or chops as ZIP.
+Browser MPC kit builder under [`webapp/`](webapp/): **left** = drum split /
+classify / recreate (pads `1–9`, MIDI **C2–G♯2**); **right** = QWERTY sample
+chopper (MIDI **C3+**). Decode at 44.1 kHz; crop a slice before process. Header
+**Looper** stacks pad takes into independent loop tracks (survives kit Reset).
+Export drums or chops as ZIP.
 
 ```bash
 ./webapp/scripts/build_wasm.sh
