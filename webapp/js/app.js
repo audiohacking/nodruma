@@ -840,6 +840,7 @@
   const btnCropDouble = document.getElementById("loop-crop-double");
   const btnCropStartHere = document.getElementById("loop-crop-start-here");
   const btnCropEndHere = document.getElementById("loop-crop-end-here");
+  const btnCropFull = document.getElementById("loop-crop-full");
 
   /** Pending crop region as 0..1 of current cycle (applied on handle release). */
   let cropStart01 = 0;
@@ -861,7 +862,8 @@
     loopPlayhead.style.left = `${x}%`;
     loopPlayhead.style.transform = "translateX(-50%)";
     if (loopCropPh && !loopCrop.classList.contains("hidden")) {
-      loopCropPh.style.left = `${x}%`;
+      const cx = (st.cropPhase01 != null ? st.cropPhase01 : st.phase01) * 100;
+      loopCropPh.style.left = `${cx}%`;
     }
   }
 
@@ -874,19 +876,15 @@
 
   function applyCropRegion() {
     const st = looper.getState();
-    if (st.cycleFrames <= 0) return;
-    const a = Math.round(cropStart01 * st.cycleFrames);
-    const b = Math.round(cropEnd01 * st.cycleFrames);
-    if (a <= 0 && b >= st.cycleFrames) return;
-    if (looper.cropCycle(a, b)) {
-      cropStart01 = 0;
-      cropEnd01 = 1;
-      cropPcmSig = -1;
+    if (st.archiveFrames <= 0) return;
+    // Non-destructive: set trim window on the full archive (can expand again)
+    if (looper.setTrim01(cropStart01, cropEnd01)) {
+      cropPcmSig = -1; // force waveform/meta refresh
     }
   }
 
   function syncCropPanel(st) {
-    const has = st.cycleFrames > 0 && st.masterPcm;
+    const has = st.archiveFrames > 0 && st.masterPcm;
     loopCrop.classList.toggle("hidden", !has);
     if (!has) return;
 
@@ -894,14 +892,21 @@
     if (sig !== cropPcmSig) {
       drawLooperWaveform(loopCropWave, st.masterPcm, null);
       cropPcmSig = sig;
-      cropStart01 = 0;
-      cropEnd01 = 1;
+    }
+    // Sync handles from looper unless user is dragging
+    if (!cropDrag) {
+      cropStart01 = st.trimStart01 ?? 0;
+      cropEnd01 = st.trimEnd01 ?? 1;
     }
     updateCropSelUi();
     const sec = st.cycleSec.toFixed(2);
+    const full = (st.archiveSec || st.cycleSec).toFixed(2);
     const bars =
       st.bpm > 0 ? (st.cycleSec / ((60 / st.bpm) * 4)).toFixed(2) : "?";
-    loopCropMeta.textContent = `${sec}s · ~${bars} bars @ ${st.bpm}`;
+    loopCropMeta.textContent =
+      st.archiveFrames > st.cycleFrames
+        ? `loop ${sec}s / take ${full}s · ~${bars} bars`
+        : `${sec}s · ~${bars} bars @ ${st.bpm}`;
   }
 
   function ensureLooperAnim() {
@@ -1231,6 +1236,9 @@
     player.ensureCtx();
     if (!looper.getState().playing) looper.play();
     looper.setCycleStartAtPlayhead();
+  });
+  btnCropFull.addEventListener("click", () => {
+    looper.resetTrim();
   });
 
   function cropClientTo01(clientX) {

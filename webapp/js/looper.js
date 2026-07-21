@@ -31,7 +31,10 @@ function createLooper(deps) {
   const tracks = [];
   for (let i = 0; i < LOOPER_TRACKS; i++) {
     tracks.push({
-      pcm: null, // Float32Array | null
+      /** Active cycle slice (what plays) */
+      pcm: null,
+      /** Full take — trim window can expand back into this */
+      archivePcm: null,
       muted: false,
       armed: i === 0,
       recording: false,
@@ -50,6 +53,10 @@ function createLooper(deps) {
   let barsPreset = 0;
   let playing = false;
   let cycleFrames = 0;
+  /** Full archived take length (trim lives inside this). */
+  let archiveFrames = 0;
+  let trimStart = 0;
+  let trimEnd = 0;
   let sampleRate = 44100;
   /** AudioContext time of cycle phase 0 */
   let cycleOrigin = 0;
@@ -193,14 +200,69 @@ function createLooper(deps) {
 
   function ensureTrackPcm(idx) {
     const t = tracks[idx];
-    if (!t.pcm || t.pcm.length !== cycleFrames) {
-      const next = new Float32Array(cycleFrames);
-      if (t.pcm && t.pcm.length) {
-        next.set(t.pcm.subarray(0, Math.min(t.pcm.length, cycleFrames)));
+    // Keep archive in sync with master archive length
+    if (archiveFrames > 0) {
+      if (!t.archivePcm || t.archivePcm.length !== archiveFrames) {
+        const arch = new Float32Array(archiveFrames);
+        if (t.archivePcm && t.archivePcm.length) {
+          arch.set(
+            t.archivePcm.subarray(0, Math.min(t.archivePcm.length, archiveFrames))
+          );
+        } else if (t.pcm && t.pcm.length && cycleFrames > 0) {
+          // Place existing cycle content at current trim
+          arch.set(
+            t.pcm.subarray(0, Math.min(t.pcm.length, cycleFrames)),
+            trimStart
+          );
+        }
+        t.archivePcm = arch;
       }
-      t.pcm = next;
+    }
+    if (!t.pcm || t.pcm.length !== cycleFrames) {
+      rebuildTrackSlice(idx);
     }
     return t.pcm;
+  }
+
+  function rebuildTrackSlice(idx) {
+    const t = tracks[idx];
+    if (cycleFrames <= 0) {
+      t.pcm = null;
+      return;
+    }
+    if (!t.archivePcm || !t.archivePcm.length) {
+      t.pcm = t.pcm && t.pcm.length === cycleFrames ? t.pcm : new Float32Array(cycleFrames);
+      return;
+    }
+    const next = new Float32Array(cycleFrames);
+    const a = Math.min(trimStart, t.archivePcm.length);
+    const copyLen = Math.max(
+      0,
+      Math.min(cycleFrames, t.archivePcm.length - a)
+    );
+    if (copyLen > 0) next.set(t.archivePcm.subarray(a, a + copyLen));
+    applySeamCrossfade(next);
+    t.pcm = next;
+  }
+
+  function rebuildAllSlices(restart) {
+    cycleFrames = Math.max(0, trimEnd - trimStart);
+    for (let i = 0; i < tracks.length; i++) {
+      if (tracks[i].archivePcm || tracks[i].pcm) rebuildTrackSlice(i);
+      if (tracks[i].source) {
+        try {
+          tracks[i].source.stop();
+        } catch {
+          /* */
+        }
+        tracks[i].source = null;
+      }
+    }
+    if (restart && playing && cycleFrames > 0) {
+      const ctx = deps.getCtx();
+      cycleOrigin = ctx.currentTime;
+      restartAllSources(ctx.currentTime);
+    }
   }
 
   function startTrackSource(idx, when) {
@@ -320,7 +382,16 @@ function createLooper(deps) {
           let idx = recWrite - lat;
           while (idx < 0) idx += cycleFrames;
           idx %= cycleFrames;
-          pcm[idx] = clampSample(pcm[idx] + v);
+          const mixed = clampSample(pcm[idx] + v);
+          pcm[idx] = mixed;
+          // Also write into archive so expanding the trim keeps overdubs
+          const tArch = tracks[recTrack];
+          if (tArch.archivePcm && archiveFrames > 0) {
+            const abs = trimStart + idx;
+            if (abs >= 0 && abs < tArch.archivePcm.length) {
+              tArch.archivePcm[abs] = mixed;
+            }
+          }
           recWrite++;
           if (recStopAt > 0 && recWrite >= recStopAt) {
             finishRecording();
@@ -385,14 +456,16 @@ function createLooper(deps) {
       }
 
       cycleFrames = len;
+      archiveFrames = len;
+      trimStart = 0;
+      trimEnd = len;
       const pcm = new Float32Array(recScratch.subarray(0, len));
       applySeamCrossfade(pcm);
       t.pcm = pcm;
+      t.archivePcm = new Float32Array(pcm);
       recScratch = null;
 
       playing = true;
-      // Align playback so "now" is the moment we closed the loop (phase ~ 0
-      // if we stopped on a grid). Keeps the drop seamless.
       const ctx = deps.getCtx();
       if (quantize !== "off" || barsPreset > 0) {
         cycleOrigin = ctx.currentTime;
@@ -400,6 +473,13 @@ function createLooper(deps) {
       restartAllSources(ctx.currentTime);
     } else if (!recIsFirst) {
       if (t.pcm) applySeamCrossfade(t.pcm);
+      // Sync archive from pcm for this track's active region
+      if (t.archivePcm && t.pcm && archiveFrames > 0) {
+        t.archivePcm.set(
+          t.pcm.subarray(0, Math.min(t.pcm.length, cycleFrames)),
+          trimStart
+        );
+      }
       if (playing && t.pcm) {
         startTrackSource(idx, deps.getCtx().currentTime);
       }
@@ -451,10 +531,14 @@ function createLooper(deps) {
       t.source = null;
     }
     t.pcm = null;
+    t.archivePcm = null;
     t.peak = 0;
 
-    if (tracks.every((x) => !x.pcm)) {
+    if (tracks.every((x) => !x.pcm && !x.archivePcm)) {
       cycleFrames = 0;
+      archiveFrames = 0;
+      trimStart = 0;
+      trimEnd = 0;
       playing = false;
       cycleOrigin = 0;
       stopTrackSources();
@@ -467,10 +551,14 @@ function createLooper(deps) {
     stopTrackSources();
     for (const t of tracks) {
       t.pcm = null;
+      t.archivePcm = null;
       t.peak = 0;
       t.recording = false;
     }
     cycleFrames = 0;
+    archiveFrames = 0;
+    trimStart = 0;
+    trimEnd = 0;
     playing = false;
     cycleOrigin = 0;
     emit();
@@ -524,108 +612,95 @@ function createLooper(deps) {
   }
 
   /**
-   * Trim all tracks to [startFrame, endFrame). Sets the master cycle length
-   * that later overdubs auto-stop on.
+   * Non-destructive trim window into the archive.
+   * Handles may expand back toward the full original take.
+   * @param {number} startFrame archive-absolute
+   * @param {number} endFrame archive-absolute (exclusive)
    */
-  function cropCycle(startFrame, endFrame) {
-    if (cycleFrames <= 0) return false;
+  function setTrim(startFrame, endFrame) {
+    if (archiveFrames <= 0) return false;
     let a = Math.max(0, Math.floor(Number(startFrame) || 0));
-    let b = Math.min(cycleFrames, Math.floor(Number(endFrame) || 0));
+    let b = Math.min(archiveFrames, Math.floor(Number(endFrame) || 0));
     if (b <= a) return false;
     const minN = minCycleFrames();
     if (b - a < minN) {
-      b = Math.min(cycleFrames, a + minN);
-      if (b - a < minN) {
-        a = Math.max(0, b - minN);
-      }
+      b = Math.min(archiveFrames, a + minN);
+      if (b - a < minN) a = Math.max(0, b - minN);
     }
     if (b - a < 64) return false;
-
-    const len = b - a;
-    for (const t of tracks) {
-      if (!t.pcm || !t.pcm.length) continue;
-      const next = new Float32Array(len);
-      const srcStart = Math.min(a, t.pcm.length);
-      const copyLen = Math.max(0, Math.min(len, t.pcm.length - srcStart));
-      if (copyLen > 0) next.set(t.pcm.subarray(srcStart, srcStart + copyLen));
-      applySeamCrossfade(next);
-      t.pcm = next;
-      if (t.source) {
-        try {
-          t.source.stop();
-        } catch {
-          /* */
-        }
-        t.source = null;
-      }
-    }
-    cycleFrames = len;
-    const ctx = deps.getCtx();
-    if (playing) {
-      cycleOrigin = ctx.currentTime;
-      restartAllSources(ctx.currentTime);
-    }
+    trimStart = a;
+    trimEnd = b;
+    rebuildAllSlices(true);
     emit();
     return true;
   }
 
-  /** Crop end to the current playhead (keep start). Great for free-length first takes. */
-  function setCycleEndAtPlayhead() {
-    if (cycleFrames <= 0) return false;
-    const ctx = deps.getCtx();
-    if (!playing) return false;
-    const end = phaseFrames(ctx.currentTime);
-    if (end < minCycleFrames()) return false;
-    return cropCycle(0, end);
+  function setTrim01(start01, end01) {
+    if (archiveFrames <= 0) return false;
+    return setTrim(start01 * archiveFrames, end01 * archiveFrames);
   }
 
-  /** Crop start to the current playhead (keep end) — fix late count-in. */
+  function resetTrim() {
+    if (archiveFrames <= 0) return false;
+    return setTrim(0, archiveFrames);
+  }
+
+  /**
+   * Trim relative to the *current* cycle (legacy crop API).
+   * Prefer setTrim for archive-absolute edits.
+   */
+  function cropCycle(startFrame, endFrame) {
+    if (cycleFrames <= 0 || archiveFrames <= 0) return false;
+    return setTrim(trimStart + startFrame, trimStart + endFrame);
+  }
+
+  /** Crop end to the current playhead (keep start). */
+  function setCycleEndAtPlayhead() {
+    if (archiveFrames <= 0 || !playing) return false;
+    const abs = trimStart + phaseFrames(deps.getCtx().currentTime);
+    if (abs - trimStart < minCycleFrames()) return false;
+    return setTrim(trimStart, abs);
+  }
+
+  /** Crop start to the current playhead (keep end). */
   function setCycleStartAtPlayhead() {
-    if (cycleFrames <= 0 || !playing) return false;
-    const start = phaseFrames(deps.getCtx().currentTime);
-    if (cycleFrames - start < minCycleFrames()) return false;
-    return cropCycle(start, cycleFrames);
+    if (archiveFrames <= 0 || !playing) return false;
+    const abs = trimStart + phaseFrames(deps.getCtx().currentTime);
+    if (trimEnd - abs < minCycleFrames()) return false;
+    return setTrim(abs, trimEnd);
   }
 
   function halveCycle() {
     if (cycleFrames < minCycleFrames() * 2) return false;
-    return cropCycle(0, Math.floor(cycleFrames / 2));
+    return setTrim(trimStart, trimStart + Math.floor(cycleFrames / 2));
   }
 
   function doubleCycle() {
     if (cycleFrames <= 0) return false;
     if (cycleFrames * 2 > maxFrames()) return false;
+    // Grow archive: active cycle duplicated; trim becomes the new full take
     const len = cycleFrames;
     for (const t of tracks) {
       if (!t.pcm || !t.pcm.length) continue;
-      const next = new Float32Array(len * 2);
       const chunk = t.pcm.subarray(0, Math.min(t.pcm.length, len));
-      next.set(chunk, 0);
-      next.set(chunk, len);
-      applySeamCrossfade(next);
-      t.pcm = next;
-      if (t.source) {
-        try {
-          t.source.stop();
-        } catch {
-          /* */
-        }
-        t.source = null;
-      }
+      const arch = new Float32Array(len * 2);
+      arch.set(chunk, 0);
+      arch.set(chunk, len);
+      t.archivePcm = arch;
+      t.pcm = null;
     }
-    cycleFrames = len * 2;
-    const ctx = deps.getCtx();
-    if (playing) {
-      cycleOrigin = ctx.currentTime;
-      restartAllSources(ctx.currentTime);
-    }
+    archiveFrames = len * 2;
+    trimStart = 0;
+    trimEnd = archiveFrames;
+    rebuildAllSlices(true);
     emit();
     return true;
   }
 
-  /** Reference waveform for the crop UI (first track with audio). */
+  /** Archive waveform for the crop UI (expandable). */
   function masterPcm() {
     for (const t of tracks) {
+      if (t.archivePcm && t.archivePcm.length) return t.archivePcm;
       if (t.pcm && t.pcm.length) return t.pcm;
     }
     return null;
@@ -742,6 +817,7 @@ function createLooper(deps) {
   }
 
   function getState() {
+    const arch = Math.max(archiveFrames, 1);
     return {
       bpm,
       quantize,
@@ -749,6 +825,12 @@ function createLooper(deps) {
       playing,
       cycleFrames,
       cycleSec: cycleSec(),
+      archiveFrames,
+      archiveSec: archiveFrames > 0 ? archiveFrames / sampleRate : 0,
+      trimStart,
+      trimEnd,
+      trimStart01: archiveFrames > 0 ? trimStart / archiveFrames : 0,
+      trimEnd01: archiveFrames > 0 ? trimEnd / archiveFrames : 1,
       sampleRate,
       recording: recTrack >= 0,
       waitingStart: recPendingStart,
@@ -767,6 +849,15 @@ function createLooper(deps) {
         if (cycleFrames <= 0 || !playing) return 0;
         return phaseFrames(deps.getCtx().currentTime) / cycleFrames;
       })(),
+      /** Playhead position on the full archive waveform (0..1) */
+      cropPhase01: (() => {
+        if (archiveFrames <= 0 || !playing || cycleFrames <= 0) {
+          return archiveFrames > 0 ? trimStart / arch : 0;
+        }
+        const abs =
+          trimStart + phaseFrames(deps.getCtx().currentTime);
+        return abs / archiveFrames;
+      })(),
       masterPcm: masterPcm(),
     };
   }
@@ -782,10 +873,20 @@ function createLooper(deps) {
       quantize,
       barsPreset,
       cycleFrames,
+      archiveFrames,
+      trimStart,
+      trimEnd,
       sampleRate,
       tracks: tracks.map((t) => ({
         muted: !!t.muted,
         armed: !!t.armed,
+        archivePcm:
+          t.archivePcm && typeof pcmToArrayBuffer === "function"
+            ? pcmToArrayBuffer(t.archivePcm)
+            : t.archivePcm
+              ? t.archivePcm.slice().buffer
+              : null,
+        // Fallback for older readers
         pcm:
           t.pcm && typeof pcmToArrayBuffer === "function"
             ? pcmToArrayBuffer(t.pcm)
@@ -805,8 +906,12 @@ function createLooper(deps) {
     playing = false;
     cycleOrigin = 0;
     cycleFrames = 0;
+    archiveFrames = 0;
+    trimStart = 0;
+    trimEnd = 0;
     for (const t of tracks) {
       t.pcm = null;
+      t.archivePcm = null;
       t.peak = 0;
       t.recording = false;
       t.muted = false;
@@ -826,26 +931,42 @@ function createLooper(deps) {
     const b = Number(snap.barsPreset);
     barsPreset = b === 1 || b === 2 || b === 4 || b === 8 ? b : 0;
     sampleRate = snap.sampleRate || sampleRate;
-    cycleFrames = Math.max(0, snap.cycleFrames | 0);
 
     const list = snap.tracks || [];
+    let maxArch = 0;
     for (let i = 0; i < tracks.length; i++) {
       const src = list[i];
       if (!src) continue;
       tracks[i].muted = !!src.muted;
       tracks[i].armed = !!src.armed;
-      const pcm =
+      const arch =
         typeof pcmFromStored === "function"
-          ? pcmFromStored(src.pcm)
-          : src.pcm instanceof Float32Array
-            ? src.pcm.slice()
-            : src.pcm
-              ? new Float32Array(src.pcm)
-              : null;
-      if (pcm && pcm.length) {
+          ? pcmFromStored(src.archivePcm || src.pcm)
+          : null;
+      const pcm =
+        typeof pcmFromStored === "function" ? pcmFromStored(src.pcm) : null;
+      if (arch && arch.length) {
+        tracks[i].archivePcm = arch;
+        maxArch = Math.max(maxArch, arch.length);
+      } else if (pcm && pcm.length) {
+        tracks[i].archivePcm = new Float32Array(pcm);
         tracks[i].pcm = pcm;
-        if (!cycleFrames) cycleFrames = pcm.length;
+        maxArch = Math.max(maxArch, pcm.length);
       }
+    }
+
+    archiveFrames =
+      snap.archiveFrames > 0 ? snap.archiveFrames | 0 : maxArch;
+    if (archiveFrames > 0) {
+      trimStart = Math.max(0, snap.trimStart | 0);
+      trimEnd =
+        snap.trimEnd > trimStart
+          ? snap.trimEnd | 0
+          : snap.cycleFrames > 0
+            ? Math.min(archiveFrames, snap.cycleFrames | 0)
+            : archiveFrames;
+      trimEnd = Math.min(archiveFrames, Math.max(trimStart + 64, trimEnd));
+      rebuildAllSlices(false);
     }
     if (!tracks.some((t) => t.armed)) tracks[0].armed = true;
     emit();
@@ -892,6 +1013,9 @@ function createLooper(deps) {
     clear,
     clearAll,
     cropCycle,
+    setTrim,
+    setTrim01,
+    resetTrim,
     setCycleEndAtPlayhead,
     setCycleStartAtPlayhead,
     halveCycle,

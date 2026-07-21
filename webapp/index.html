@@ -173,10 +173,11 @@
     <div id="loop-crop" class="loop-crop hidden">
       <div class="loop-crop-bar">
         <span class="loop-crop-label">Cycle</span>
-        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Keep first half">½</button>
-        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate length">×2</button>
+        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Keep first half of selection">½</button>
+        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate loop length">×2</button>
         <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Crop start to playhead">Start here</button>
         <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Crop end to playhead">End here</button>
+        <button type="button" id="loop-crop-full" class="btn ghost tiny" title="Expand selection to full original take">Full take</button>
         <span id="loop-crop-meta" class="meta"></span>
       </div>
       <div class="loop-crop-wave-wrap" id="loop-crop-wave-wrap">
@@ -187,7 +188,7 @@
         </div>
         <div id="loop-crop-ph" class="loop-crop-ph"></div>
       </div>
-      <p class="hint">Drag handles to trim · <strong>End here</strong> while playing locks length for other tracks</p>
+      <p class="hint">Drag handles on the <em>full take</em> — trim in or expand back · overdubs follow the selection</p>
     </div>
 
     <div class="looper-tracks" id="looper-tracks"></div>
