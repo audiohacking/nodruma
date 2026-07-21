@@ -1,7 +1,10 @@
 # nodruma
 
-**No Drama Drums** — portable C++ tool to chop drum grooves and recreate
-kick / snare / hat one-shots. Experimental, headless.
+**No Drama Drums** — portable C++ tool to chop drum grooves and recreate kick / snare / hat one-shots + sample chopper
+
+
+<img width="800" height="527" alt="image" src="https://github.com/user-attachments/assets/f12a6c0d-8dd2-4f2b-bf24-b0c4029eb21f" />
+
 
 ## Build
 
