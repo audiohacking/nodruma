@@ -126,13 +126,32 @@ class PadPlayer {
     this.buffers.delete(padId);
   }
 
-  play(padId) {
+  /**
+   * @param {string} padId
+   * @param {{pitchSemitones?:number,eqLowDb?:number,eqHighDb?:number}} [fx]
+   */
+  play(padId, fx = {}) {
     const ctx = this.ensureCtx();
     const buf = this.buffers.get(padId);
     if (!buf) return false;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(ctx.destination);
+    const semis = fx.pitchSemitones ?? 0;
+    src.playbackRate.value = Math.pow(2, semis / 12);
+
+    const low = ctx.createBiquadFilter();
+    low.type = "lowshelf";
+    low.frequency.value = 250;
+    low.gain.value = fx.eqLowDb ?? 0;
+
+    const high = ctx.createBiquadFilter();
+    high.type = "highshelf";
+    high.frequency.value = 4000;
+    high.gain.value = fx.eqHighDb ?? 0;
+
+    src.connect(low);
+    low.connect(high);
+    high.connect(ctx.destination);
     src.start();
     return true;
   }

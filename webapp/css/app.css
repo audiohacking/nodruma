@@ -408,9 +408,9 @@ kbd {
 }
 
 .sampler-grid {
-  /* Q W E R T / Y U I O P / A S D F G / H J K L ; */
-  grid-template-columns: repeat(5, 1fr);
-  grid-auto-rows: minmax(5.75rem, auto);
+  /* 4×4: QWER / ASDF / ZXCV / TYUI */
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: minmax(7rem, auto);
   aspect-ratio: auto;
   max-height: none;
 }
@@ -424,8 +424,9 @@ kbd {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 4.75rem;
+  min-height: 5.25rem;
   min-width: 0;
+  overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: transform 0.06s, box-shadow 0.06s, border-color 0.1s, opacity 0.15s;
   user-select: none;
@@ -433,9 +434,9 @@ kbd {
 }
 
 .sampler-grid .pad {
-  min-height: 5.75rem;
-  padding: 0.5rem;
-  gap: 0.2rem;
+  min-height: 7rem;
+  padding: 0.55rem;
+  gap: 0.25rem;
 }
 
 .pad:active {
@@ -539,6 +540,68 @@ kbd {
   gap: 0.15rem;
   margin-top: auto;
   padding-top: 0.2rem;
+}
+
+.pad-fx {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  background: rgba(12, 13, 16, 0.96);
+  border-radius: 4px;
+  overflow: auto;
+}
+
+.pad.fx-open {
+  z-index: 6;
+  overflow: visible;
+}
+
+.pad.fx-open .pad-fx {
+  display: flex;
+}
+
+.fx-row {
+  display: grid;
+  grid-template-columns: 2.4rem 1fr 2.4rem;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.58rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fx-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+
+.sampler-col .fx-row input[type="range"] {
+  accent-color: var(--violet);
+}
+
+.fx-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: right;
+  font-size: 0.58rem;
+}
+
+.fx-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+}
+
+.fx-btns .btn.tiny {
+  flex: 1 1 auto;
+  min-width: 3.4rem;
 }
 
 .btn {
@@ -658,7 +721,7 @@ footer a {
 
   .sampler-grid {
     grid-template-columns: repeat(4, 1fr);
-    grid-auto-rows: minmax(5.5rem, auto);
+    grid-auto-rows: minmax(6.5rem, auto);
   }
 }
 

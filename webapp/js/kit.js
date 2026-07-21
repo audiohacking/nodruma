@@ -33,6 +33,9 @@ class Kit {
       sampleRate,
       discarded: false,
       recreated: false,
+      pitchSemitones: 0,
+      eqLowDb: 0,
+      eqHighDb: 0,
     });
     return this.pads[this.pads.length - 1];
   }
@@ -121,6 +124,44 @@ class Kit {
     p.recreated = true;
   }
 
+  setFx(id, { pitchSemitones, eqLowDb, eqHighDb } = {}) {
+    const p = this.pads.find((x) => x.id === id);
+    if (!p) return;
+    if (pitchSemitones != null) p.pitchSemitones = pitchSemitones;
+    if (eqLowDb != null) p.eqLowDb = eqLowDb;
+    if (eqHighDb != null) p.eqHighDb = eqHighDb;
+  }
+
+  /**
+   * Duplicate an active pad.
+   * @param {string} id
+   * @param {'next'|'end'} where insert after source, or at end of kit
+   */
+  clonePad(id, where = "next") {
+    const srcIdx = this.pads.findIndex((p) => p.id === id && !p.discarded);
+    if (srcIdx < 0) return null;
+    const src = this.pads[srcIdx];
+    const copy = {
+      id: `${this.idPrefix}${this._seq++}`,
+      name: `${src.name}_copy`,
+      kind: src.kind,
+      confidence: src.confidence,
+      pcm: src.pcm,
+      sampleRate: src.sampleRate,
+      discarded: false,
+      recreated: src.recreated,
+      pitchSemitones: src.pitchSemitones ?? 0,
+      eqLowDb: src.eqLowDb ?? 0,
+      eqHighDb: src.eqHighDb ?? 0,
+    };
+    if (where === "end") {
+      this.pads.push(copy);
+    } else {
+      this.pads.splice(srcIdx + 1, 0, copy);
+    }
+    return copy;
+  }
+
   async exportZip() {
     if (typeof JSZip === "undefined") throw new Error("JSZip missing");
     const zip = new JSZip();
@@ -143,6 +184,9 @@ class Kit {
         kind: p.kind,
         confidence: p.confidence,
         recreated: p.recreated,
+        pitch_semitones: p.pitchSemitones ?? 0,
+        eq_low_db: p.eqLowDb ?? 0,
+        eq_high_db: p.eqHighDb ?? 0,
       });
     }
     zip.file("kit.json", JSON.stringify(manifest, null, 2));
@@ -150,10 +194,10 @@ class Kit {
   }
 }
 
-/** QWERTY sampler: 20 pads per page (Q–P, A–;). */
+/** QWERTY sampler: 4×4 = 16 pads per page. */
 class SamplerKit extends Kit {
   constructor() {
-    super({ pageSize: 20, idPrefix: "s", exportName: "chops" });
+    super({ pageSize: 16, idPrefix: "s", exportName: "chops" });
   }
 }
 
@@ -164,15 +208,19 @@ class DrumKit extends Kit {
   }
 }
 
-/** Two rows: QWERTY top, ASDF bottom (US layout). */
+/** 4×4 map: QWER / ASDF / ZXCV / TYUI */
 const SAMPLER_KEYS = [
-  "q", "w", "e", "r", "t", "y", "u", "i", "o", "p",
-  "a", "s", "d", "f", "g", "h", "j", "k", "l", ";",
+  "q", "w", "e", "r",
+  "a", "s", "d", "f",
+  "z", "x", "c", "v",
+  "t", "y", "u", "i",
 ];
 
 const SAMPLER_KEY_LABELS = [
-  "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P",
-  "A", "S", "D", "F", "G", "H", "J", "K", "L", ";",
+  "Q", "W", "E", "R",
+  "A", "S", "D", "F",
+  "Z", "X", "C", "V",
+  "T", "Y", "U", "I",
 ];
 
 function sanitize(name) {

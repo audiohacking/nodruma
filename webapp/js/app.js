@@ -279,7 +279,11 @@
 
     function triggerPad(pad, el) {
       player.ensureCtx();
-      player.play(pad.id);
+      player.play(pad.id, {
+        pitchSemitones: pad.pitchSemitones ?? 0,
+        eqLowDb: pad.eqLowDb ?? 0,
+        eqHighDb: pad.eqHighDb ?? 0,
+      });
       if (el) {
         el.classList.add("flash");
         setTimeout(() => el.classList.remove("flash"), 120);
