@@ -835,14 +835,16 @@
   });
 
   // WebMIDI: C2–G♯2 → drums, C3+ → sampler pages
+  // Permission prompt only appears from a user gesture (do not request on load).
   const btnMidi = document.getElementById("btn-midi");
   const midi = createMidiController({
     onStatus(msg, ok) {
-      btnMidi.textContent = msg.replace(/^MIDI · /, "MIDI · ");
+      btnMidi.textContent = msg;
       btnMidi.title =
-        "C2–G♯2 = drums 1–9 · C3+ = sampler (16/page, chromatic)\n" + msg;
-      btnMidi.classList.toggle("midi-on", !!ok);
+        "Click to enable WebMIDI\nC2–G♯2 = drums 1–9 · C3+ = sampler (16/page)\n" + msg;
+      btnMidi.classList.toggle("midi-on", ok === true);
       btnMidi.classList.toggle("midi-off", ok === false);
+      btnMidi.classList.toggle("midi-wait", ok === undefined && msg.includes("allow"));
     },
     onNote(mapped, velocity) {
       if (busy) return;
@@ -865,15 +867,20 @@
     },
   });
 
-  btnMidi.addEventListener("click", async () => {
-    btnMidi.disabled = true;
-    await midi.enable();
-    btnMidi.disabled = false;
+  btnMidi.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Keep this sync path tied to the click so Chrome shows the MIDI prompt
+    void midi.enable();
   });
 
-  // Auto-try MIDI on load (may require click on some browsers)
-  if (navigator.requestMIDIAccess) {
-    midi.enable().catch(() => {});
+  if (!midi.midiSupported()) {
+    btnMidi.textContent = "MIDI n/a";
+    btnMidi.classList.add("midi-off");
+    btnMidi.title = "WebMIDI is not supported in this browser (try Chrome or Edge)";
+  } else {
+    // Only auto-connect when permission was already granted earlier
+    midi.enableIfGranted().catch(() => {});
   }
 
   samplerCol.renderPads();

@@ -90,6 +90,11 @@ body > * {
   font-size: 0.72rem;
 }
 
+.midi-btn {
+  min-width: 4.5rem;
+  cursor: pointer;
+}
+
 .midi-btn.midi-on {
   border-color: var(--mint);
   color: var(--mint);
@@ -98,6 +103,11 @@ body > * {
 .midi-btn.midi-off {
   border-color: var(--rose);
   color: var(--rose);
+}
+
+.midi-btn.midi-wait {
+  border-color: var(--amber, #e6b84d);
+  color: var(--amber, #e6b84d);
 }
 
 
