@@ -172,12 +172,12 @@
 
     <div id="loop-crop" class="loop-crop hidden">
       <div class="loop-crop-bar">
-        <span class="loop-crop-label">Cycle</span>
-        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Keep first half of selection">½</button>
-        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate loop length">×2</button>
-        <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Crop start to playhead">Start here</button>
-        <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Crop end to playhead">End here</button>
-        <button type="button" id="loop-crop-full" class="btn ghost tiny" title="Expand selection to full original take">Full take</button>
+        <span class="loop-crop-label" id="loop-crop-track-label">Track 1</span>
+        <button type="button" id="loop-crop-halve" class="btn ghost tiny" title="Halve selection">½</button>
+        <button type="button" id="loop-crop-double" class="btn ghost tiny" title="Duplicate cycle">×2</button>
+        <button type="button" id="loop-crop-start-here" class="btn ghost tiny" title="Set selection start at playhead">Start here</button>
+        <button type="button" id="loop-crop-end-here" class="btn ghost tiny" title="Set selection end at playhead">End here</button>
+        <button type="button" id="loop-crop-full" class="btn ghost tiny" title="Expand to full take">Full take</button>
         <span id="loop-crop-meta" class="meta"></span>
       </div>
       <div class="loop-crop-wave-wrap" id="loop-crop-wave-wrap">
@@ -188,7 +188,19 @@
         </div>
         <div id="loop-crop-ph" class="loop-crop-ph"></div>
       </div>
-      <p class="hint">Drag handles on the <em>full take</em> — trim in or expand back · overdubs follow the selection</p>
+      <div class="loop-crop-shift-row">
+        <label class="loop-field">
+          <span>Shift</span>
+          <input type="range" id="loop-shift" min="-50" max="50" value="0" step="1" />
+        </label>
+        <label class="loop-field">
+          <span>Pitch</span>
+          <input type="range" id="loop-pitch" min="-12" max="12" value="0" step="1" />
+        </label>
+        <button type="button" id="loop-shift-reset" class="btn ghost tiny">Reset</button>
+        <span id="loop-shift-meta" class="meta"></span>
+      </div>
+      <p class="hint">Click a track to edit it · drag handles to trim <em>or expand</em> · Shift aligns layers while playing</p>
     </div>
 
     <div class="looper-tracks" id="looper-tracks"></div>

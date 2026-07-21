@@ -934,6 +934,39 @@ body[data-screen="looper"] #btn-looper {
   left: 0%;
 }
 
+.loop-crop-shift-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.loop-crop-shift-row input[type="range"] {
+  width: 8rem;
+  accent-color: var(--amber);
+}
+
+.loop-track.selected {
+  border-color: var(--ice);
+  box-shadow: inset 3px 0 0 var(--ice);
+}
+
+.loop-track .loop-wave-wrap {
+  position: relative;
+}
+
+.loop-track-ph {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--mint);
+  pointer-events: none;
+  left: 0%;
+  opacity: 0.85;
+}
+
 .looper-tracks {
   display: flex;
   flex-direction: column;

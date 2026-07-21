@@ -841,6 +841,11 @@
   const btnCropStartHere = document.getElementById("loop-crop-start-here");
   const btnCropEndHere = document.getElementById("loop-crop-end-here");
   const btnCropFull = document.getElementById("loop-crop-full");
+  const loopCropTrackLabel = document.getElementById("loop-crop-track-label");
+  const inputLoopShift = document.getElementById("loop-shift");
+  const inputLoopPitch = document.getElementById("loop-pitch");
+  const btnShiftReset = document.getElementById("loop-shift-reset");
+  const loopShiftMeta = document.getElementById("loop-shift-meta");
 
   /** Pending crop region as 0..1 of current cycle (applied on handle release). */
   let cropStart01 = 0;
@@ -862,49 +867,70 @@
     loopPlayhead.style.left = `${x}%`;
     loopPlayhead.style.transform = "translateX(-50%)";
     if (loopCropPh && !loopCrop.classList.contains("hidden")) {
-      const cx = (st.cropPhase01 != null ? st.cropPhase01 : st.phase01) * 100;
-      loopCropPh.style.left = `${cx}%`;
+      loopCropPh.style.left = `${(st.cropPhase01 || 0) * 100}%`;
     }
+    looperTracksEl.querySelectorAll(".loop-track-ph").forEach((el) => {
+      el.style.left = `${x}%`;
+    });
   }
 
   function updateCropSelUi() {
-    const left = cropStart01 * 100;
-    const right = (1 - cropEnd01) * 100;
-    loopCropSel.style.left = `${left}%`;
-    loopCropSel.style.right = `${right}%`;
+    loopCropSel.style.left = `${cropStart01 * 100}%`;
+    loopCropSel.style.right = `${(1 - cropEnd01) * 100}%`;
   }
 
-  function applyCropRegion() {
-    const st = looper.getState();
-    if (st.archiveFrames <= 0) return;
-    // Non-destructive: set trim window on the full archive (can expand again)
-    if (looper.setTrim01(cropStart01, cropEnd01)) {
-      cropPcmSig = -1; // force waveform/meta refresh
+  function applyCropRegion(live) {
+    if ((looper.getState().takeFrames || looper.getState().archiveFrames) <= 0) {
+      return;
     }
+    looper.setTrim01(cropStart01, cropEnd01);
+    if (!live) cropPcmSig = -1;
   }
 
   function syncCropPanel(st) {
-    const has = st.archiveFrames > 0 && st.masterPcm;
+    const takeN = st.takeFrames || st.archiveFrames || 0;
+    const has = takeN > 0 && st.masterPcm;
     loopCrop.classList.toggle("hidden", !has);
     if (!has) return;
 
-    const sig = st.masterPcm.length;
+    const sel = st.selectedTrack ?? 0;
+    if (loopCropTrackLabel) loopCropTrackLabel.textContent = `Track ${sel + 1}`;
+
+    const sig = `${sel}:${st.masterPcm.length}`;
     if (sig !== cropPcmSig) {
       drawLooperWaveform(loopCropWave, st.masterPcm, null);
       cropPcmSig = sig;
     }
-    // Sync handles from looper unless user is dragging
     if (!cropDrag) {
       cropStart01 = st.trimStart01 ?? 0;
       cropEnd01 = st.trimEnd01 ?? 1;
     }
     updateCropSelUi();
+
+    const t = st.tracks[sel];
+    if (t && inputLoopShift && inputLoopPitch) {
+      let shift01 = t.shift01 || 0;
+      if (shift01 > 0.5) shift01 -= 1;
+      const sliderVal = Math.round(shift01 * 100);
+      if (document.activeElement !== inputLoopShift) {
+        inputLoopShift.value = String(sliderVal);
+      }
+      if (document.activeElement !== inputLoopPitch) {
+        inputLoopPitch.value = String(t.pitchSemitones || 0);
+      }
+      if (loopShiftMeta) {
+        loopShiftMeta.textContent = `shift ${sliderVal}% · pitch ${
+          t.pitchSemitones || 0
+        }st`;
+      }
+    }
+
     const sec = st.cycleSec.toFixed(2);
-    const full = (st.archiveSec || st.cycleSec).toFixed(2);
+    const full = (st.takeSec || st.archiveSec || st.cycleSec).toFixed(2);
     const bars =
       st.bpm > 0 ? (st.cycleSec / ((60 / st.bpm) * 4)).toFixed(2) : "?";
     loopCropMeta.textContent =
-      st.archiveFrames > st.cycleFrames
+      takeN > st.cycleFrames
         ? `loop ${sec}s / take ${full}s · ~${bars} bars`
         : `${sec}s · ~${bars} bars @ ${st.bpm}`;
   }
@@ -968,6 +994,7 @@
       const t = st.tracks[i];
       if (!t) return;
       row.classList.toggle("armed", t.armed);
+      row.classList.toggle("selected", !!t.selected);
       row.classList.toggle("recording", t.recording);
       const armBtn = row.querySelector("[data-arm]");
       const muteBtn = row.querySelector("[data-mute]");
@@ -985,7 +1012,6 @@
           ? `${Math.min(100, Math.round(t.peak * 140))}%`
           : "0%";
       }
-      // onChange only — redraw so overdubs show up even when length is unchanged
       drawLooperWaveform(waveCanvases[i], t.pcm, null);
       waveDrawn[i] = t.pcm ? t.pcm.length : 0;
     });
@@ -1128,6 +1154,9 @@
       meter.dataset.meter = String(i);
       waveWrap.appendChild(canvas);
       waveWrap.appendChild(meter);
+      const trackPh = document.createElement("div");
+      trackPh.className = "loop-track-ph";
+      waveWrap.appendChild(trackPh);
       waveCanvases.push(canvas);
       waveDrawn.push(null);
 
@@ -1164,6 +1193,7 @@
       row.addEventListener("click", (e) => {
         if (e.target.closest("button")) return;
         player.ensureCtx();
+        looper.selectTrack(i);
         looper.arm(i);
       });
 
@@ -1241,6 +1271,27 @@
     looper.resetTrim();
   });
 
+  if (inputLoopShift) {
+    inputLoopShift.addEventListener("input", () => {
+      const st = looper.getState();
+      const pct = Number(inputLoopShift.value) || 0;
+      looper.setTrackShift01(st.selectedTrack, pct / 100);
+    });
+  }
+  if (inputLoopPitch) {
+    inputLoopPitch.addEventListener("input", () => {
+      const st = looper.getState();
+      looper.setTrackPitch(st.selectedTrack, inputLoopPitch.value);
+    });
+  }
+  if (btnShiftReset) {
+    btnShiftReset.addEventListener("click", () => {
+      const st = looper.getState();
+      looper.setTrackShift(st.selectedTrack, 0);
+      looper.setTrackPitch(st.selectedTrack, 0);
+    });
+  }
+
   function cropClientTo01(clientX) {
     const rect = loopCropWrap.getBoundingClientRect();
     if (rect.width <= 0) return 0;
@@ -1264,6 +1315,7 @@
       cropEnd01 = Math.max(x, cropStart01 + minGap);
     }
     updateCropSelUi();
+    applyCropRegion(true);
   });
   loopCropWrap.addEventListener("pointerup", (e) => {
     if (!cropDrag) return;
@@ -1273,7 +1325,7 @@
     } catch {
       /* */
     }
-    applyCropRegion();
+    applyCropRegion(false);
   });
   loopCropWrap.addEventListener("pointercancel", () => {
     cropDrag = null;
