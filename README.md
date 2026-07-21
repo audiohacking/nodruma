@@ -13,7 +13,8 @@
 - Export Samples as Kit
 
 <a href="https://audiohacking.github.io/nodruma/" target="_blank">
-  <img width="800" height="527" alt="image" src="https://github.com/user-attachments/assets/f12a6c0d-8dd2-4f2b-bf24-b0c4029eb21f" />
+  <!--img width="800" height="527" alt="image" src="https://github.com/user-attachments/assets/f12a6c0d-8dd2-4f2b-bf24-b0c4029eb21f" /-->
+  <img width="683" height="441" alt="NODRUMA-DEMO-ezgif com-optimize" src="https://github.com/user-attachments/assets/d861b006-8bc3-4df3-b568-9ddcab3e14bf" />
 </a>
 
 
