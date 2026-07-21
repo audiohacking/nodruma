@@ -9,6 +9,7 @@
   let api = null;
   let busy = false;
   let globalDragDepth = 0;
+  let sessionReady = false;
 
   const engineVer = document.getElementById("engine-ver");
   const workspace = document.getElementById("workspace");
@@ -16,6 +17,27 @@
   const exportDropdown = document.getElementById("export-dropdown");
   const btnExportDrums = document.getElementById("btn-export-drums");
   const btnExportChops = document.getElementById("btn-export-chops");
+  const btnSessionClear = document.getElementById("btn-session-clear");
+
+  /** @type {{schedule:Function,flush:Function,suspend:Function}|null} */
+  let sessionSaver = null;
+
+  function noteKitChanged() {
+    if (sessionSaver && sessionReady) sessionSaver.schedule();
+    updateSessionClearBtn();
+  }
+
+  function updateSessionClearBtn() {
+    if (!btnSessionClear) return;
+    const hasKits =
+      drums.activePads().length > 0 || sampler.activePads().length > 0;
+    const hasLoop =
+      sessionLooper && sessionLooper.getState().cycleFrames > 0;
+    btnSessionClear.disabled = !hasKits && !hasLoop;
+  }
+
+  /** Set after looper is created — used by session clear enablement */
+  let sessionLooper = null;
 
   /**
    * @param {object} cfg
@@ -75,6 +97,7 @@
       btnLoad.disabled = busy;
       if (btnReset) btnReset.disabled = busy || !has;
       updateExportButtons();
+      noteKitChanged();
     }
 
     function resetColumn() {
@@ -87,6 +110,7 @@
       if (mode === "drums" && api) api.clearHits();
       hideProgress();
       renderPads();
+      noteKitChanged();
     }
 
     function setBank(next) {
@@ -908,7 +932,97 @@
     onChange: () => {
       syncLooperUi();
       ensureLooperAnim();
+      noteKitChanged();
     },
+  });
+  sessionLooper = looper;
+
+  function syncLooperFormFromState() {
+    const st = looper.getState();
+    inputLoopBpm.value = String(st.bpm);
+    selectLoopQuantize.value = st.quantize;
+    selectLoopBars.value = String(st.barsPreset);
+  }
+
+  sessionSaver = createSessionSaver(() => ({
+    drums: drums.toSnapshot(),
+    sampler: sampler.toSnapshot(),
+    looper: looper.exportSnapshot(),
+    ui: {
+      drumsBank: drumsCol.bank,
+      samplerBank: samplerCol.bank,
+      screen: document.body.dataset.screen || "pads",
+    },
+  }));
+
+  function applyKitToPlayer(kit) {
+    player.clear(kit.idPrefix);
+    for (const p of kit.pads) {
+      if (!p.discarded && p.pcm) player.setSample(p.id, p.pcm, p.sampleRate);
+    }
+  }
+
+  async function restoreSession() {
+    sessionSaver.suspend(true);
+    try {
+      const data = await loadSession();
+      if (!data || data.v !== NODRUMA_SESSION_VERSION) return false;
+      if (data.drums) drums.loadSnapshot(data.drums);
+      if (data.sampler) sampler.loadSnapshot(data.sampler);
+      applyKitToPlayer(drums);
+      applyKitToPlayer(sampler);
+      if (data.looper) looper.importSnapshot(data.looper);
+      syncLooperFormFromState();
+      if (data.ui) {
+        if (typeof data.ui.drumsBank === "number") drumsCol.setBank(data.ui.drumsBank);
+        if (typeof data.ui.samplerBank === "number") {
+          samplerCol.setBank(data.ui.samplerBank);
+        }
+      }
+      return true;
+    } catch (err) {
+      console.warn("restoreSession", err);
+      return false;
+    } finally {
+      sessionSaver.suspend(false);
+      sessionReady = true;
+      updateSessionClearBtn();
+    }
+  }
+
+  async function wipeSessionAndKits() {
+    if (
+      !confirm(
+        "Clear saved session?\nThis removes drums, sampler chops, and looper tracks from this browser."
+      )
+    ) {
+      return;
+    }
+    sessionSaver.suspend(true);
+    await clearSession();
+    looper.clearAll();
+    player.clear("d");
+    player.clear("s");
+    drums.reset(drums.exportName);
+    sampler.reset(sampler.exportName);
+    if (api) {
+      api.clearHits?.();
+      api.clearChops?.();
+    }
+    drumsCol.setBank(0);
+    samplerCol.setBank(0);
+    drumsCol.renderPads();
+    samplerCol.renderPads();
+    syncLooperFormFromState();
+    syncLooperUi();
+    sessionSaver.suspend(false);
+    sessionReady = true;
+    updateSessionClearBtn();
+    updateExportButtons();
+  }
+
+  btnSessionClear.addEventListener("click", () => {
+    void wipeSessionAndKits();
   });
 
   function buildLooperTracks() {
@@ -1002,6 +1116,7 @@
       syncLooperUi();
       ensureLooperAnim();
     }
+    noteKitChanged();
   });
 
   btnLoopPlay.addEventListener("click", () => {
@@ -1015,13 +1130,18 @@
     looper.toggleRec();
   });
   btnLoopClearAll.addEventListener("click", () => looper.clearAll());
-  inputLoopBpm.addEventListener("change", () => looper.setBpm(inputLoopBpm.value));
-  selectLoopQuantize.addEventListener("change", () =>
-    looper.setQuantize(selectLoopQuantize.value)
-  );
-  selectLoopBars.addEventListener("change", () =>
-    looper.setBarsPreset(selectLoopBars.value)
-  );
+  inputLoopBpm.addEventListener("change", () => {
+    looper.setBpm(inputLoopBpm.value);
+    noteKitChanged();
+  });
+  selectLoopQuantize.addEventListener("change", () => {
+    looper.setQuantize(selectLoopQuantize.value);
+    noteKitChanged();
+  });
+  selectLoopBars.addEventListener("change", () => {
+    looper.setBarsPreset(selectLoopBars.value);
+    noteKitChanged();
+  });
 
   // Keyboard: digits → drums, QWERTY → sampler, PgUp/Dn → banks;
   // Space → looper play/stop; R → rec only on looper screen (R is a sampler pad)
@@ -1147,4 +1267,28 @@
   drumsCol.renderPads();
   updateExportButtons();
   initEngine();
+
+  // Restore last session (kits + looper) then enable autosave
+  restoreSession()
+    .then((ok) => {
+      drumsCol.renderPads();
+      samplerCol.renderPads();
+      syncLooperUi();
+      syncLooperFormFromState();
+      updateExportButtons();
+      if (ok) {
+        const n =
+          drums.activePads().length + sampler.activePads().length;
+        if (n > 0 || looper.getState().cycleFrames > 0) {
+          engineVer.title = "Session restored from this browser";
+        }
+      }
+    })
+    .catch(() => {
+      sessionReady = true;
+    });
+
+  window.addEventListener("pagehide", () => {
+    if (sessionSaver && sessionReady) void sessionSaver.flush();
+  });
 })();

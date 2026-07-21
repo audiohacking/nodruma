@@ -192,6 +192,67 @@ class Kit {
     zip.file("kit.json", JSON.stringify(manifest, null, 2));
     return zip.generateAsync({ type: "blob" });
   }
+
+  /** Snapshot for IndexedDB (Float32Array clones via structured clone). */
+  toSnapshot() {
+    return {
+      sourceName: this.sourceName,
+      seq: this._seq,
+      pads: this.pads.map((p) => ({
+        id: p.id,
+        name: p.name,
+        kind: p.kind,
+        confidence: p.confidence ?? 0,
+        sampleRate: p.sampleRate,
+        discarded: !!p.discarded,
+        recreated: !!p.recreated,
+        pitchSemitones: p.pitchSemitones ?? 0,
+        eqLowDb: p.eqLowDb ?? 0,
+        eqHighDb: p.eqHighDb ?? 0,
+        pcm: p.pcm,
+      })),
+    };
+  }
+
+  /**
+   * Restore from snapshot. Does not touch PadPlayer — caller loads samples.
+   * @param {ReturnType<Kit['toSnapshot']>|null|undefined} snap
+   */
+  loadSnapshot(snap) {
+    this.pads = [];
+    this._seq = 0;
+    this.sourceName = this.exportName;
+    if (!snap) return;
+    this.sourceName = snap.sourceName || this.exportName;
+    this._seq = snap.seq || 0;
+    for (const p of snap.pads || []) {
+      let pcm = p.pcm;
+      if (pcm && !(pcm instanceof Float32Array)) {
+        pcm = new Float32Array(pcm);
+      }
+      if (!pcm || !pcm.length) continue;
+      this.pads.push({
+        id: p.id,
+        name: p.name || "pad",
+        kind: p.kind || "unknown",
+        confidence: p.confidence ?? 0,
+        pcm,
+        sampleRate: p.sampleRate || 44100,
+        discarded: !!p.discarded,
+        recreated: !!p.recreated,
+        pitchSemitones: p.pitchSemitones ?? 0,
+        eqLowDb: p.eqLowDb ?? 0,
+        eqHighDb: p.eqHighDb ?? 0,
+      });
+    }
+    // Keep seq ahead of any restored ids
+    let maxSeq = this._seq;
+    for (const p of this.pads) {
+      const m = String(p.id).match(/(\d+)$/);
+      if (m) maxSeq = Math.max(maxSeq, Number(m[1]) + 1);
+    }
+    this._seq = maxSeq;
+  }
 }
 
 /** QWERTY sampler: 4×4 = 16 pads per page. */

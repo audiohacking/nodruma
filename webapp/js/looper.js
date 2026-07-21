@@ -655,6 +655,73 @@ function createLooper(deps) {
     uiVisible = !!v;
   }
 
+  /** Persistable looper state (stopped on restore — hit Play to resume). */
+  function exportSnapshot() {
+    return {
+      bpm,
+      quantize,
+      barsPreset,
+      cycleFrames,
+      sampleRate,
+      tracks: tracks.map((t) => ({
+        muted: !!t.muted,
+        armed: !!t.armed,
+        pcm: t.pcm ? new Float32Array(t.pcm) : null,
+      })),
+    };
+  }
+
+  /**
+   * @param {ReturnType<typeof exportSnapshot>|null|undefined} snap
+   */
+  function importSnapshot(snap) {
+    cancelRecording();
+    stopTrackSources();
+    playing = false;
+    cycleOrigin = 0;
+    cycleFrames = 0;
+    for (const t of tracks) {
+      t.pcm = null;
+      t.peak = 0;
+      t.recording = false;
+      t.muted = false;
+      t.armed = false;
+    }
+    tracks[0].armed = true;
+
+    if (!snap) {
+      emit();
+      return;
+    }
+
+    bpm = Math.max(40, Math.min(240, Math.round(Number(snap.bpm) || 120)));
+    if (snap.quantize === "off" || snap.quantize === "beat" || snap.quantize === "bar") {
+      quantize = snap.quantize;
+    }
+    const b = Number(snap.barsPreset);
+    barsPreset = b === 1 || b === 2 || b === 4 || b === 8 ? b : 0;
+    sampleRate = snap.sampleRate || sampleRate;
+    cycleFrames = Math.max(0, snap.cycleFrames | 0);
+
+    const list = snap.tracks || [];
+    for (let i = 0; i < tracks.length; i++) {
+      const src = list[i];
+      if (!src) continue;
+      tracks[i].muted = !!src.muted;
+      tracks[i].armed = !!src.armed;
+      if (src.pcm && src.pcm.length) {
+        const pcm =
+          src.pcm instanceof Float32Array
+            ? new Float32Array(src.pcm)
+            : new Float32Array(src.pcm);
+        tracks[i].pcm = pcm;
+        if (!cycleFrames) cycleFrames = pcm.length;
+      }
+    }
+    if (!tracks.some((t) => t.armed)) tracks[0].armed = true;
+    emit();
+  }
+
   function dispose() {
     cancelRecording();
     stopTrackSources();
@@ -696,6 +763,8 @@ function createLooper(deps) {
     clear,
     clearAll,
     setUiVisible,
+    exportSnapshot,
+    importSnapshot,
     dispose,
     phaseFrames: () =>
       cycleFrames > 0 ? phaseFrames(deps.getCtx().currentTime) : 0,
