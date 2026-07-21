@@ -89,6 +89,8 @@ async function decodeAudioBuffer(arrayBuffer, label = "audio") {
 class PadPlayer {
   constructor() {
     this.ctx = null;
+    /** @type {GainNode|null} pad mix → destination (also tapped by looper) */
+    this.padBus = null;
     this.buffers = new Map();
   }
 
@@ -98,7 +100,29 @@ class PadPlayer {
       this.ctx = new AC();
     }
     if (this.ctx.state === "suspended") this.ctx.resume();
+    this.ensureGraph();
     return this.ctx;
+  }
+
+  /** Shared pad mix bus — one GainNode into destination. */
+  ensureGraph() {
+    const ctx = this.ctx;
+    if (!ctx) return null;
+    if (!this.padBus) {
+      this.padBus = ctx.createGain();
+      this.padBus.gain.value = 1;
+      this.padBus.connect(ctx.destination);
+    }
+    return this.padBus;
+  }
+
+  getPadBus() {
+    this.ensureCtx();
+    return this.padBus;
+  }
+
+  getCtx() {
+    return this.ensureCtx();
   }
 
   setSample(padId, float32Mono, sampleRate) {
@@ -156,7 +180,7 @@ class PadPlayer {
     src.connect(low);
     low.connect(high);
     high.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.ensureGraph());
     src.start();
     return true;
   }

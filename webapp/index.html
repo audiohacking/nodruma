@@ -18,6 +18,7 @@
     </div>
     <div class="top-actions">
       <span id="engine-ver" class="meta">loading engine…</span>
+      <button type="button" id="btn-looper" class="btn ghost" title="Toggle looper screen">Looper</button>
       <button type="button" id="btn-midi" class="btn ghost midi-btn" title="Click to enable WebMIDI (C2=drums, C3+=sampler)">MIDI</button>
       <div class="export-menu">
         <button type="button" id="btn-export" class="btn primary" disabled>Export</button>
@@ -125,6 +126,52 @@
     </section>
   </main>
 
+  <section id="looper-screen" class="looper-screen" aria-label="Looper">
+    <header class="looper-head">
+      <div>
+        <h2>Looper</h2>
+        <p class="col-sub">Stack pad takes · survives kit Reset</p>
+      </div>
+      <p class="hint looper-hint">Set bars + BPM · Arm · Rec · play pads · Rec closes · <kbd>R</kbd> / <kbd>Space</kbd></p>
+    </header>
+
+    <div class="looper-transport" id="looper-transport">
+      <button type="button" id="loop-play" class="btn primary" title="Play (Space)">Play</button>
+      <button type="button" id="loop-stop" class="btn ghost" title="Stop">Stop</button>
+      <button type="button" id="loop-rec" class="btn ghost loop-rec-btn" title="Record / overdub (R)">Rec</button>
+      <label class="loop-field">
+        <span>BPM</span>
+        <input type="number" id="loop-bpm" min="40" max="240" value="120" />
+      </label>
+      <label class="loop-field">
+        <span>Quantize</span>
+        <select id="loop-quantize">
+          <option value="off">Off</option>
+          <option value="beat">Beat</option>
+          <option value="bar" selected>Bar</option>
+        </select>
+      </label>
+      <label class="loop-field">
+        <span>Bars</span>
+        <select id="loop-bars">
+          <option value="0">Free</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="4" selected>4</option>
+          <option value="8">8</option>
+        </select>
+      </label>
+      <button type="button" id="loop-clear-all" class="btn ghost danger">Clear all</button>
+      <span id="loop-status" class="meta loop-status">empty</span>
+    </div>
+
+    <div class="looper-playhead-wrap" aria-hidden="true">
+      <div id="loop-playhead" class="looper-playhead"></div>
+    </div>
+
+    <div class="looper-tracks" id="looper-tracks"></div>
+  </section>
+
   <footer>
     <p>nodruma demo · chops run in-browser via WebAssembly · <a href="https://github.com/audiohacking/nodruma">source</a></p>
   </footer>
@@ -135,6 +182,7 @@
   <script src="js/audio.js"></script>
   <script src="js/crop.js"></script>
   <script src="js/midi.js"></script>
+  <script src="js/looper.js"></script>
   <script src="js/kit.js"></script>
   <script src="js/wasm.js"></script>
   <script src="js/app.js"></script>

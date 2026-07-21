@@ -717,6 +717,220 @@ footer a {
   color: var(--amber-dim);
 }
 
+/* —— Looper screen (separate from pads workspace) —— */
+body[data-screen="looper"] #workspace,
+body[data-screen="looper"] #mobile-tabs,
+body[data-screen="looper"] > footer {
+  display: none;
+}
+
+body[data-screen="pads"] #looper-screen,
+body:not([data-screen="looper"]) #looper-screen {
+  display: none;
+}
+
+body[data-screen="looper"] #looper-screen {
+  display: flex;
+}
+
+body[data-screen="looper"] #btn-looper {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.looper-screen {
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 2rem;
+  min-height: calc(100vh - 5rem);
+}
+
+.looper-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.looper-head h2 {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  letter-spacing: 0.06em;
+  margin: 0;
+  font-weight: 400;
+}
+
+.looper-hint {
+  margin: 0;
+}
+
+.looper-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg1);
+  border: 1px solid var(--steel);
+}
+
+.loop-field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.loop-field input,
+.loop-field select {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  background: var(--pad);
+  border: 1px solid var(--steel);
+  padding: 0.3rem 0.4rem;
+  min-width: 3.5rem;
+}
+
+.loop-field input[type="number"] {
+  width: 4rem;
+}
+
+.loop-rec-btn.recording {
+  border-color: var(--rose);
+  color: var(--rose);
+  animation: loop-pulse 1s ease-in-out infinite;
+}
+
+.loop-rec-btn.waiting {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.loop-track {
+  cursor: pointer;
+}
+
+@keyframes loop-pulse {
+  50% { opacity: 0.55; }
+}
+
+.loop-status {
+  margin-left: auto;
+}
+
+.looper-playhead-wrap {
+  position: relative;
+  height: 3px;
+  background: var(--steel);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.looper-playhead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--amber);
+  transform: translateX(0);
+  will-change: transform;
+}
+
+.looper-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.loop-track {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  background: var(--bg1);
+  border: 1px solid var(--steel);
+}
+
+.loop-track.armed {
+  border-color: var(--amber-dim);
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.loop-track.recording {
+  border-color: var(--rose);
+}
+
+.loop-track-num {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-align: center;
+}
+
+.loop-track.armed .loop-track-num {
+  color: var(--amber);
+}
+
+.loop-wave-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.loop-wave {
+  display: block;
+  width: 100%;
+  height: 48px;
+  border-radius: 2px;
+}
+
+.loop-meter {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0%;
+  background: var(--mint);
+  pointer-events: none;
+}
+
+.loop-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.loop-track-actions .btn.on {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+
+.loop-track-actions .btn.arm-on {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .loop-track {
+    grid-template-columns: 2rem 1fr;
+  }
+
+  .loop-track-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 1099px) {
   .mobile-tabs {
     display: flex;

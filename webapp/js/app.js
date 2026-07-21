@@ -790,9 +790,272 @@
     downloadZip(sampler, "chops");
   });
 
-  // Keyboard: digits → drums, QWERTY → sampler, PgUp/Dn → focused column banks
+  // —— Looper screen (independent of kits) ——
+  const btnLooper = document.getElementById("btn-looper");
+  const looperTracksEl = document.getElementById("looper-tracks");
+  const loopPlayhead = document.getElementById("loop-playhead");
+  const loopStatus = document.getElementById("loop-status");
+  const btnLoopPlay = document.getElementById("loop-play");
+  const btnLoopStop = document.getElementById("loop-stop");
+  const btnLoopRec = document.getElementById("loop-rec");
+  const inputLoopBpm = document.getElementById("loop-bpm");
+  const selectLoopQuantize = document.getElementById("loop-quantize");
+  const selectLoopBars = document.getElementById("loop-bars");
+  const btnLoopClearAll = document.getElementById("loop-clear-all");
+
+  document.body.dataset.screen = "pads";
+
+  /** @type {HTMLCanvasElement[]} */
+  const waveCanvases = [];
+  /** @type {(boolean|null)[]} */
+  const waveDrawn = [];
+  let looperRaf = 0;
+
+  function tickLooperPlayhead() {
+    const st = looper.getState();
+    const x = st.phase01 * 100;
+    loopPlayhead.style.left = `${x}%`;
+    loopPlayhead.style.transform = "translateX(-50%)";
+  }
+
+  function ensureLooperAnim() {
+    if (!looperRaf) looperRaf = requestAnimationFrame(looperAnimLoop);
+  }
+
+  function looperAnimLoop() {
+    looperRaf = 0;
+    const st = looper.getState();
+    const onLooper = document.body.dataset.screen === "looper";
+    if (!st.playing && !st.recording) {
+      tickLooperPlayhead();
+      return;
+    }
+    tickLooperPlayhead();
+    if (st.recording) {
+      looperTracksEl.querySelectorAll("[data-meter]").forEach((meter) => {
+        const i = Number(meter.dataset.meter);
+        const t = st.tracks[i];
+        if (t && t.recording) {
+          meter.style.width = `${Math.min(100, Math.round(t.peak * 140))}%`;
+        }
+      });
+    }
+    // Keep RAF alive while playing even if Pads screen is showing
+    void onLooper;
+    looperRaf = requestAnimationFrame(looperAnimLoop);
+  }
+
+  function syncLooperUi() {
+    const st = looper.getState();
+    btnLoopRec.classList.toggle("recording", st.recording);
+    btnLoopRec.classList.toggle("waiting", st.waitingStart || st.waitingStop);
+    btnLoopPlay.textContent = st.playing ? "Playing" : "Play";
+
+    if (st.waitingStart) {
+      loopStatus.textContent = "waiting for grid…";
+    } else if (st.waitingStop) {
+      loopStatus.textContent = "closing on grid…";
+    } else if (st.recording && st.cycleFrames <= 0) {
+      loopStatus.textContent = "recording first take…";
+    } else if (st.recording) {
+      loopStatus.textContent = `overdub T${st.recTrack + 1}…`;
+    } else if (st.cycleFrames <= 0) {
+      loopStatus.textContent = "empty — arm + Rec";
+    } else {
+      const sec = st.cycleSec.toFixed(2);
+      const bars =
+        st.bpm > 0
+          ? (st.cycleSec / ((60 / st.bpm) * 4)).toFixed(2)
+          : "?";
+      loopStatus.textContent = `${sec}s ≈ ${bars} bars · ${
+        st.playing ? "run" : "stop"
+      }`;
+    }
+
+    looperTracksEl.querySelectorAll(".loop-track").forEach((row) => {
+      const i = Number(row.dataset.track);
+      const t = st.tracks[i];
+      if (!t) return;
+      row.classList.toggle("armed", t.armed);
+      row.classList.toggle("recording", t.recording);
+      const armBtn = row.querySelector("[data-arm]");
+      const muteBtn = row.querySelector("[data-mute]");
+      if (armBtn) {
+        armBtn.classList.toggle("arm-on", t.armed);
+        armBtn.textContent = t.armed ? "Armed" : "Arm";
+      }
+      if (muteBtn) {
+        muteBtn.classList.toggle("on", !t.muted);
+        muteBtn.textContent = t.muted ? "Off" : "On";
+      }
+      const meter = row.querySelector("[data-meter]");
+      if (meter) {
+        meter.style.width = t.recording
+          ? `${Math.min(100, Math.round(t.peak * 140))}%`
+          : "0%";
+      }
+      // Redraw waveform when buffer identity/length changes (not every peak tick)
+      const sig = t.pcm ? t.pcm.length : 0;
+      if (waveDrawn[i] !== sig) {
+        drawLooperWaveform(waveCanvases[i], t.pcm, null);
+        waveDrawn[i] = sig;
+      }
+    });
+
+    tickLooperPlayhead();
+  }
+
+  const looper = createLooper({
+    getCtx: () => player.getCtx(),
+    getPadBus: () => player.getPadBus(),
+    onChange: () => {
+      syncLooperUi();
+      ensureLooperAnim();
+    },
+  });
+
+  function buildLooperTracks() {
+    looperTracksEl.innerHTML = "";
+    waveCanvases.length = 0;
+    waveDrawn.length = 0;
+    for (let i = 0; i < LOOPER_TRACKS; i++) {
+      const row = document.createElement("div");
+      row.className = "loop-track";
+      row.dataset.track = String(i);
+
+      const num = document.createElement("div");
+      num.className = "loop-track-num";
+      num.textContent = String(i + 1);
+
+      const waveWrap = document.createElement("div");
+      waveWrap.className = "loop-wave-wrap";
+      const canvas = document.createElement("canvas");
+      canvas.className = "loop-wave";
+      canvas.width = 640;
+      canvas.height = 48;
+      canvas.setAttribute("aria-hidden", "true");
+      const meter = document.createElement("div");
+      meter.className = "loop-meter";
+      meter.dataset.meter = String(i);
+      waveWrap.appendChild(canvas);
+      waveWrap.appendChild(meter);
+      waveCanvases.push(canvas);
+      waveDrawn.push(null);
+
+      const actions = document.createElement("div");
+      actions.className = "loop-track-actions";
+
+      const btnArm = document.createElement("button");
+      btnArm.type = "button";
+      btnArm.className = "btn ghost tiny";
+      btnArm.textContent = "Arm";
+      btnArm.dataset.arm = String(i);
+
+      const btnMute = document.createElement("button");
+      btnMute.type = "button";
+      btnMute.className = "btn ghost tiny";
+      btnMute.textContent = "On";
+      btnMute.dataset.mute = String(i);
+
+      const btnClear = document.createElement("button");
+      btnClear.type = "button";
+      btnClear.className = "btn ghost tiny danger";
+      btnClear.textContent = "Clear";
+      btnClear.dataset.clear = String(i);
+
+      actions.appendChild(btnArm);
+      actions.appendChild(btnMute);
+      actions.appendChild(btnClear);
+
+      row.appendChild(num);
+      row.appendChild(waveWrap);
+      row.appendChild(actions);
+      looperTracksEl.appendChild(row);
+
+      row.addEventListener("click", (e) => {
+        if (e.target.closest("button")) return;
+        player.ensureCtx();
+        looper.arm(i);
+      });
+
+      btnArm.addEventListener("click", () => {
+        player.ensureCtx();
+        looper.arm(i);
+      });
+      btnMute.addEventListener("click", () => {
+        player.ensureCtx();
+        looper.toggleMute(i);
+      });
+      btnClear.addEventListener("click", () => {
+        looper.clear(i);
+      });
+    }
+  }
+
+  buildLooperTracks();
+  syncLooperUi();
+
+  btnLooper.addEventListener("click", () => {
+    const next = document.body.dataset.screen === "looper" ? "pads" : "looper";
+    document.body.dataset.screen = next;
+    btnLooper.textContent = next === "looper" ? "Pads" : "Looper";
+    looper.setUiVisible(next === "looper");
+    if (next === "looper") {
+      player.ensureCtx();
+      syncLooperUi();
+      ensureLooperAnim();
+    }
+  });
+
+  btnLoopPlay.addEventListener("click", () => {
+    player.ensureCtx();
+    looper.play();
+  });
+  btnLoopStop.addEventListener("click", () => looper.stop());
+  btnLoopRec.addEventListener("click", () => {
+    if (busy) return;
+    player.ensureCtx();
+    looper.toggleRec();
+  });
+  btnLoopClearAll.addEventListener("click", () => looper.clearAll());
+  inputLoopBpm.addEventListener("change", () => looper.setBpm(inputLoopBpm.value));
+  selectLoopQuantize.addEventListener("change", () =>
+    looper.setQuantize(selectLoopQuantize.value)
+  );
+  selectLoopBars.addEventListener("change", () =>
+    looper.setBarsPreset(selectLoopBars.value)
+  );
+
+  // Keyboard: digits → drums, QWERTY → sampler, PgUp/Dn → banks;
+  // Space → looper play/stop; R → rec only on looper screen (R is a sampler pad)
   window.addEventListener("keydown", (e) => {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (
+      e.target &&
+      (e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.tagName === "SELECT")
+    ) {
+      return;
+    }
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      player.ensureCtx();
+      const st = looper.getState();
+      if (st.playing && st.cycleFrames > 0 && !st.recording) looper.stop();
+      else looper.play();
+      return;
+    }
+    if (
+      (e.key === "r" || e.key === "R") &&
+      document.body.dataset.screen === "looper"
+    ) {
+      if (busy) return;
+      e.preventDefault();
+      player.ensureCtx();
+      looper.toggleRec();
+      return;
+    }
 
     if (e.key === "PageUp" || e.key === "PageDown") {
       const tab = workspace.dataset.tab || "sampler";
