@@ -36,8 +36,8 @@ function createLooper(deps) {
    *   shiftFrames: number,
    *   pitchSemitones: number,
    *   volume: number,
-   *   eqLowDb: number,
-   *   eqHighDb: number,
+   *   hpf: number,
+   *   lpf: number,
    *   reverb: number,
    *   muted: boolean,
    *   armed: boolean,
@@ -61,8 +61,10 @@ function createLooper(deps) {
       shiftFrames: 0,
       pitchSemitones: 0,
       volume: 1,
-      eqLowDb: 0,
-      eqHighDb: 0,
+      /** HP amount 0..1 (404-style high-pass) */
+      hpf: 0,
+      /** LP amount 0..1 (404-style low-pass) */
+      lpf: 0,
       reverb: 0,
       muted: false,
       armed: i === 0,
@@ -109,6 +111,8 @@ function createLooper(deps) {
   let reverbNode = null;
   /** @type {GainNode|null} */
   let reverbReturn = null;
+  /** @type {GainNode|null} */
+  let reverbInput = null;
 
   let recTrack = -1;
   let recWrite = 0;
@@ -191,27 +195,55 @@ function createLooper(deps) {
     }
     if (!reverbNode) {
       reverbNode = ctx.createConvolver();
-      reverbNode.buffer = makeImpulseResponse(ctx, 1.6);
+      reverbNode.normalize = false; // keep IR hot — we control level in gains
+      reverbNode.buffer = makeImpulseResponse(ctx, 3.2);
+      reverbInput = ctx.createGain();
+      reverbInput.gain.value = 1;
       reverbReturn = ctx.createGain();
-      reverbReturn.gain.value = 0.85;
+      reverbReturn.gain.value = 2.4;
+      reverbInput.connect(reverbNode);
       reverbNode.connect(reverbReturn);
       reverbReturn.connect(loopBus);
     }
     return loopBus;
   }
 
-  /** Short noise IR for a usable plate-ish reverb. */
+  /**
+   * Dense hall-ish IR — exaggerated tails so max Verb is obvious.
+   * normalize=false on convolver, so peak stays hot.
+   */
   function makeImpulseResponse(ctx, seconds) {
     const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
     const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    const sr = ctx.sampleRate;
     for (let c = 0; c < 2; c++) {
       const d = buf.getChannelData(c);
+      const side = c === 0 ? 1 : -1;
       for (let i = 0; i < len; i++) {
-        const t = i / len;
-        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.2);
+        const t = i / sr;
+        const norm = i / len;
+        // Early slap + long exponential tail
+        const early = i < sr * 0.045 ? (Math.random() * 2 - 1) * 0.55 * (1 - i / (sr * 0.045)) : 0;
+        const tail = (Math.random() * 2 - 1) * Math.exp(-t * 1.35) * (1.15 - 0.35 * norm);
+        const diffuse = (Math.random() * 2 - 1) * Math.exp(-t * 0.55) * 0.35;
+        d[i] = (early + tail + diffuse) * (0.92 + 0.08 * side);
       }
     }
     return buf;
+  }
+
+  /** Map 0..1 HP amount → cutoff Hz (open → aggressive). */
+  function hpfHzFromAmount(amt) {
+    const a = Math.max(0, Math.min(1, Number(amt) || 0));
+    // 30 Hz (transparent) → ~2800 Hz (hard HP)
+    return 30 * Math.pow(2800 / 30, a);
+  }
+
+  /** Map 0..1 LP amount → cutoff Hz (open → dark). */
+  function lpfHzFromAmount(amt) {
+    const a = Math.max(0, Math.min(1, Number(amt) || 0));
+    // 18000 Hz (open) → ~180 Hz (hard LP)
+    return 18000 * Math.pow(180 / 18000, a);
   }
 
   /** Record alignment trim only — padBus is internal, no outputLatency guess. */
@@ -614,13 +646,21 @@ function createLooper(deps) {
     const t = tracks[idx];
     const ctx = deps.getCtx();
     ensureLoopBus();
-    if (t.lowEq) return;
+    if (t.lowEq) {
+      // Migrate older shelf graphs to hard HP/LP
+      t.lowEq.type = "highpass";
+      t.highEq.type = "lowpass";
+      return;
+    }
+    // MPC / 404-style hard filters: HPF then LPF
     t.lowEq = ctx.createBiquadFilter();
-    t.lowEq.type = "lowshelf";
-    t.lowEq.frequency.value = 250;
+    t.lowEq.type = "highpass";
+    t.lowEq.frequency.value = 30;
+    t.lowEq.Q.value = 3.2;
     t.highEq = ctx.createBiquadFilter();
-    t.highEq.type = "highshelf";
-    t.highEq.frequency.value = 4000;
+    t.highEq.type = "lowpass";
+    t.highEq.frequency.value = 18000;
+    t.highEq.Q.value = 3.2;
     t.gainNode = ctx.createGain();
     t.dryGain = ctx.createGain();
     t.reverbSend = ctx.createGain();
@@ -629,7 +669,7 @@ function createLooper(deps) {
     t.gainNode.connect(t.dryGain);
     t.gainNode.connect(t.reverbSend);
     t.dryGain.connect(loopBus);
-    t.reverbSend.connect(reverbNode);
+    t.reverbSend.connect(reverbInput || reverbNode);
   }
 
   function applyTrackFx(idx) {
@@ -638,13 +678,29 @@ function createLooper(deps) {
     const silent = t.muted || !t.pcm;
     const vol = silent ? 0 : Math.max(0, Math.min(1.5, t.volume ?? 1));
     t.gainNode.gain.value = vol;
-    if (t.lowEq) t.lowEq.gain.value = t.eqLowDb || 0;
-    if (t.highEq) t.highEq.gain.value = t.eqHighDb || 0;
-    if (t.dryGain) t.dryGain.gain.value = 1;
+
+    const hpfAmt = Math.max(0, Math.min(1, t.hpf || 0));
+    const lpfAmt = Math.max(0, Math.min(1, t.lpf || 0));
+    if (t.lowEq) {
+      t.lowEq.type = "highpass";
+      t.lowEq.frequency.value = hpfHzFromAmount(hpfAmt);
+      // More resonance as you dig in — 404 grit
+      t.lowEq.Q.value = 1.2 + hpfAmt * 4.5;
+    }
+    if (t.highEq) {
+      t.highEq.type = "lowpass";
+      t.highEq.frequency.value = lpfHzFromAmount(lpfAmt);
+      t.highEq.Q.value = 1.2 + lpfAmt * 4.5;
+    }
+
+    const verb = silent ? 0 : Math.max(0, Math.min(1, t.reverb || 0));
+    // Dry ducks as verb rises so max wash is unmistakable
+    if (t.dryGain) {
+      t.dryGain.gain.value = silent ? 0 : Math.max(0.12, 1 - verb * 0.78);
+    }
     if (t.reverbSend) {
-      t.reverbSend.gain.value = silent
-        ? 0
-        : Math.max(0, Math.min(1, t.reverb || 0));
+      // Hot send curve — quiet near 0, huge at 1
+      t.reverbSend.gain.value = silent ? 0 : Math.pow(verb, 0.85) * 2.8;
     }
   }
 
@@ -946,8 +1002,8 @@ function createLooper(deps) {
     t.shiftFrames = 0;
     t.pitchSemitones = 0;
     t.volume = 1;
-    t.eqLowDb = 0;
-    t.eqHighDb = 0;
+    t.hpf = 0;
+    t.lpf = 0;
     t.reverb = 0;
     t.peak = 0;
     applyTrackFx(i);
@@ -976,8 +1032,8 @@ function createLooper(deps) {
       t.shiftFrames = 0;
       t.pitchSemitones = 0;
       t.volume = 1;
-      t.eqLowDb = 0;
-      t.eqHighDb = 0;
+      t.hpf = 0;
+      t.lpf = 0;
       t.reverb = 0;
       t.peak = 0;
       t.recording = false;
@@ -1198,11 +1254,18 @@ function createLooper(deps) {
     if (fx.volume != null) {
       t.volume = Math.max(0, Math.min(1.5, Number(fx.volume) || 0));
     }
-    if (fx.eqLowDb != null) {
-      t.eqLowDb = Math.max(-12, Math.min(12, Number(fx.eqLowDb) || 0));
+    if (fx.hpf != null) {
+      t.hpf = Math.max(0, Math.min(1, Number(fx.hpf) || 0));
+    } else if (fx.eqLowDb != null) {
+      // Legacy shelf UI sent ±dB; treat 0..100 as amount if large, else ignore
+      const n = Number(fx.eqLowDb) || 0;
+      t.hpf = n > 1 ? Math.max(0, Math.min(1, n / 100)) : 0;
     }
-    if (fx.eqHighDb != null) {
-      t.eqHighDb = Math.max(-12, Math.min(12, Number(fx.eqHighDb) || 0));
+    if (fx.lpf != null) {
+      t.lpf = Math.max(0, Math.min(1, Number(fx.lpf) || 0));
+    } else if (fx.eqHighDb != null) {
+      const n = Number(fx.eqHighDb) || 0;
+      t.lpf = n > 1 ? Math.max(0, Math.min(1, n / 100)) : 0;
     }
     if (fx.reverb != null) {
       t.reverb = Math.max(0, Math.min(1, Number(fx.reverb) || 0));
@@ -1484,8 +1547,8 @@ function createLooper(deps) {
           shiftSigned01: shiftSigned,
           pitchSemitones: t.pitchSemitones || 0,
           volume: t.volume ?? 1,
-          eqLowDb: t.eqLowDb || 0,
-          eqHighDb: t.eqHighDb || 0,
+          hpf: t.hpf || 0,
+          lpf: t.lpf || 0,
           reverb: t.reverb || 0,
         };
       }),
@@ -1514,8 +1577,8 @@ function createLooper(deps) {
         shiftFrames: t.shiftFrames || 0,
         pitchSemitones: t.pitchSemitones || 0,
         volume: t.volume ?? 1,
-        eqLowDb: t.eqLowDb || 0,
-        eqHighDb: t.eqHighDb || 0,
+        hpf: t.hpf || 0,
+        lpf: t.lpf || 0,
         reverb: t.reverb || 0,
         regionStart: t.regionStart | 0,
         regionEnd: t.regionEnd | 0,
@@ -1555,8 +1618,8 @@ function createLooper(deps) {
       t.shiftFrames = 0;
       t.pitchSemitones = 0;
       t.volume = 1;
-      t.eqLowDb = 0;
-      t.eqHighDb = 0;
+      t.hpf = 0;
+      t.lpf = 0;
       t.reverb = 0;
       t.peak = 0;
       t.recording = false;
@@ -1601,8 +1664,20 @@ function createLooper(deps) {
       tracks[i].pitchSemitones = src.pitchSemitones || 0;
       tracks[i].volume =
         src.volume != null ? Math.max(0, Math.min(1.5, Number(src.volume))) : 1;
-      tracks[i].eqLowDb = src.eqLowDb || 0;
-      tracks[i].eqHighDb = src.eqHighDb || 0;
+      if (src.hpf != null) {
+        tracks[i].hpf = Math.max(0, Math.min(1, Number(src.hpf) || 0));
+      } else if (src.eqLowDb != null && Math.abs(Number(src.eqLowDb)) > 12) {
+        tracks[i].hpf = Math.max(0, Math.min(1, Number(src.eqLowDb) / 100));
+      } else {
+        tracks[i].hpf = 0;
+      }
+      if (src.lpf != null) {
+        tracks[i].lpf = Math.max(0, Math.min(1, Number(src.lpf) || 0));
+      } else if (src.eqHighDb != null && Math.abs(Number(src.eqHighDb)) > 12) {
+        tracks[i].lpf = Math.max(0, Math.min(1, Number(src.eqHighDb) / 100));
+      } else {
+        tracks[i].lpf = 0;
+      }
       tracks[i].reverb =
         src.reverb != null ? Math.max(0, Math.min(1, Number(src.reverb))) : 0;
       const tape =

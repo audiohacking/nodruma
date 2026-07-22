@@ -930,8 +930,8 @@
       };
       setIfIdle(inputLoopPitch, t.pitchSemitones || 0);
       setIfIdle(inputLoopVol, Math.round((t.volume ?? 1) * 100));
-      setIfIdle(inputLoopEqLow, t.eqLowDb || 0);
-      setIfIdle(inputLoopEqHigh, t.eqHighDb || 0);
+      setIfIdle(inputLoopEqLow, Math.round((t.hpf || 0) * 100));
+      setIfIdle(inputLoopEqHigh, Math.round((t.lpf || 0) * 100));
       setIfIdle(inputLoopReverb, Math.round((t.reverb || 0) * 100));
       if (loopShiftMeta) {
         const signedMs = (t.shiftSigned01 || 0) * (st.cycleSec || 0) * 1000;
@@ -1366,13 +1366,17 @@
   if (inputLoopEqLow) {
     inputLoopEqLow.addEventListener("input", () => {
       const st = looper.getState();
-      looper.setTrackFx(st.selectedTrack, { eqLowDb: inputLoopEqLow.value });
+      looper.setTrackFx(st.selectedTrack, {
+        hpf: (Number(inputLoopEqLow.value) || 0) / 100,
+      });
     });
   }
   if (inputLoopEqHigh) {
     inputLoopEqHigh.addEventListener("input", () => {
       const st = looper.getState();
-      looper.setTrackFx(st.selectedTrack, { eqHighDb: inputLoopEqHigh.value });
+      looper.setTrackFx(st.selectedTrack, {
+        lpf: (Number(inputLoopEqHigh.value) || 0) / 100,
+      });
     });
   }
   if (inputLoopReverb) {
@@ -1400,8 +1404,8 @@
       looper.setTrackFx(st.selectedTrack, {
         pitchSemitones: 0,
         volume: 1,
-        eqLowDb: 0,
-        eqHighDb: 0,
+        hpf: 0,
+        lpf: 0,
         reverb: 0,
       });
     });

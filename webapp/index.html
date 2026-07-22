@@ -211,16 +211,16 @@
           <input type="range" id="loop-pitch" min="-12" max="12" value="0" step="1" />
         </label>
         <label class="loop-field">
-          <span>Low</span>
-          <input type="range" id="loop-eq-low" min="-12" max="12" value="0" step="1" />
+          <span>HP</span>
+          <input type="range" id="loop-eq-low" min="0" max="100" value="0" step="1" title="High-pass (404-style)" />
         </label>
         <label class="loop-field">
-          <span>High</span>
-          <input type="range" id="loop-eq-high" min="-12" max="12" value="0" step="1" />
+          <span>LP</span>
+          <input type="range" id="loop-eq-high" min="0" max="100" value="0" step="1" title="Low-pass (404-style)" />
         </label>
         <label class="loop-field">
           <span>Verb</span>
-          <input type="range" id="loop-reverb" min="0" max="100" value="0" step="1" />
+          <input type="range" id="loop-reverb" min="0" max="100" value="0" step="1" title="Reverb wash" />
         </label>
         <button type="button" id="loop-shift-reset" class="btn ghost tiny">Flat</button>
         <span id="loop-shift-meta" class="meta"></span>
