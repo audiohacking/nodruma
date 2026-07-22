@@ -18,7 +18,6 @@ const LOOPER_PROC_SIZE = 2048;
 const LOOPER_BEATS_PER_BAR = 4;
 /** Pre-roll clicks when Click is armed and Rec is pressed. */
 const LOOPER_COUNT_IN_BEATS = 4;
-const LOOPER_SEAM_FADE = 64;
 
 /**
  * @param {{
@@ -116,9 +115,12 @@ function createLooper(deps) {
   let recSamplesWritten = 0;
   /** @type {Float32Array|null} */
   let recScratch = null;
-  /** Clean overdub capture (cycle-phase domain) — mixed into tape only on commit. */
+  /** Sequential overdub capture (same quality path as first take). */
   /** @type {Float32Array|null} */
   let overdubScratch = null;
+  let overdubWrite = 0;
+  /** Cycle phase at punch-in — scratch[i] maps to (startPhase + i) % cycle. */
+  let overdubStartPhase = 0;
   let recIsFirst = false;
   let recStopAt = 0;
   let recPendingStop = false;
@@ -442,19 +444,6 @@ function createLooper(deps) {
     return v;
   }
 
-  function applySeamCrossfade(pcm) {
-    const n = Math.min(LOOPER_SEAM_FADE, Math.floor(pcm.length / 4));
-    if (n < 2) return;
-    for (let i = 0; i < n; i++) {
-      const t = i / n;
-      const fadeIn = Math.sin((t * Math.PI) / 2);
-      const fadeOut = Math.cos((t * Math.PI) / 2);
-      const start = pcm[i];
-      const end = pcm[pcm.length - n + i];
-      pcm[i] = start * fadeIn + end * fadeOut;
-    }
-  }
-
   /** Circular-shift `src` by `shift` samples into `dst` (same length). */
   function circularShiftInto(dst, src, shift) {
     const n = dst.length;
@@ -469,8 +458,9 @@ function createLooper(deps) {
   }
 
   /**
-   * Build playing buffer: tile track region into master cycleFrames, then shift.
-   * Uneven phrases stay on the grid — they repeat instead of shrinking the clock.
+   * Build playing buffer from dry tape: tile region → shift.
+   * No seam coloring / no baked FX — EQ/reverb/vol stay on the live graph only.
+   * Pitch is applied here only when the user set it (keeps BufferSource at rate 1).
    */
   function rebuildTrackPcm(idx) {
     const t = tracks[idx];
@@ -492,16 +482,13 @@ function createLooper(deps) {
     const regionLen = re - rs;
     const region = t.tape.subarray(rs, re);
     const filled = new Float32Array(cycleFrames);
-    // Shorter than master → tile; longer → first cycleFrames (clock stays)
     for (let i = 0; i < cycleFrames; i++) {
       filled[i] = region[i % regionLen];
     }
-    const shifted = new Float32Array(cycleFrames);
-    circularShiftInto(shifted, filled, t.shiftFrames);
-    // Bake pitch into buffer so BufferSource stays at rate 1 (clock lock)
-    const pitched = bakePitchSameLength(shifted, t.pitchSemitones || 0);
-    applySeamCrossfade(pitched);
-    t.pcm = pitched;
+    const out = new Float32Array(cycleFrames);
+    circularShiftInto(out, filled, t.shiftFrames || 0);
+    const semis = t.pitchSemitones || 0;
+    t.pcm = semis ? bakePitchSameLength(out, semis) : out;
   }
 
   /**
@@ -724,10 +711,8 @@ function createLooper(deps) {
       if (!recIsFirst && !overdubScratch) return;
 
       const n = input.length;
-      // ScriptProcessor: buffer ends near currentTime; sample i at blockStart+i/sr
       const blockEnd = ctx.currentTime;
       const blockStart = blockEnd - n / sampleRate;
-      const syncF = syncOffsetFrames();
 
       let i0 = 0;
       if (recPendingStart) {
@@ -742,9 +727,13 @@ function createLooper(deps) {
           recWrite = 0;
           syncClickTransport();
         } else if (cycleFrames > 0) {
-          recSamplesWritten = 0;
+          // Sequential capture from punch — same quality as first take
+          overdubWrite = 0;
+          overdubStartPhase = phaseFrames(recStartAtCtx);
           if (!overdubScratch || overdubScratch.length !== cycleFrames) {
             overdubScratch = new Float32Array(cycleFrames);
+          } else {
+            overdubScratch.fill(0);
           }
         }
         emit();
@@ -770,13 +759,13 @@ function createLooper(deps) {
           }
         } else {
           if (cycleFrames <= 0 || !overdubScratch) break;
-          // As-played lock: map capture time → shared cycle phase
-          const tCap = blockStart + i / sampleRate + syncF / sampleRate;
-          const idx = phaseFrames(tCap);
-          // Capture into isolated scratch only — never touch playing tape/pcm live
-          overdubScratch[idx] = clampSample(overdubScratch[idx] + v);
-          recSamplesWritten++;
-          if (recSamplesWritten >= cycleFrames) {
+          // Contiguous samples (no per-sample phase remap — that caused metallic bass)
+          if (overdubWrite >= cycleFrames) {
+            finishRecording();
+            break;
+          }
+          overdubScratch[overdubWrite++] = v;
+          if (overdubWrite >= cycleFrames) {
             finishRecording();
             break;
           }
@@ -786,7 +775,10 @@ function createLooper(deps) {
     };
   }
 
-  /** Commit overdub scratch into the track tape (phrase domain), then rebuild. */
+  /**
+   * Lay sequential overdub audio onto the tape at punch phase.
+   * Scratch[i] was heard at cycle phase (startPhase + i).
+   */
   function commitOverdubToTape(idx) {
     const t = tracks[idx];
     if (!t || !overdubScratch || cycleFrames <= 0 || takeFrames <= 0) return;
@@ -800,16 +792,19 @@ function createLooper(deps) {
     const re = t.regionEnd > rs ? t.regionEnd | 0 : takeFrames;
     const regionLen = Math.max(1, re - rs);
     const shift = t.shiftFrames || 0;
-    for (let idxP = 0; idxP < cycleFrames; idxP++) {
-      const v = overdubScratch[idxP];
+    const n = Math.min(overdubWrite, overdubScratch.length, cycleFrames);
+    for (let i = 0; i < n; i++) {
+      const v = overdubScratch[i];
       if (v === 0) continue;
-      const unshifted = (idxP + shift) % cycleFrames;
+      const phase = (overdubStartPhase + i) % cycleFrames;
+      const unshifted = (phase + shift) % cycleFrames;
       const abs = rs + (unshifted % regionLen);
       if (abs >= 0 && abs < tape.length) {
         tape[abs] = clampSample(tape[abs] + v);
       }
     }
     overdubScratch = null;
+    overdubWrite = 0;
   }
 
   function finishRecording() {
@@ -890,6 +885,7 @@ function createLooper(deps) {
     recPendingStart = false;
     recStopAt = 0;
     overdubScratch = null;
+    overdubWrite = 0;
     emit();
   }
 
@@ -899,6 +895,7 @@ function createLooper(deps) {
     tracks[recTrack].peak = 0;
     recScratch = null;
     overdubScratch = null;
+    overdubWrite = 0;
     recTrack = -1;
     recIsFirst = false;
     recPendingStop = false;
@@ -1304,6 +1301,8 @@ function createLooper(deps) {
         recStartAtCtx = plan.recStart;
         recPendingStart = true;
         overdubScratch = new Float32Array(cycleFrames);
+        overdubWrite = 0;
+        overdubStartPhase = phaseFrames(plan.recStart);
         if (!playing) {
           playing = true;
           restartAllSources(now);
@@ -1314,6 +1313,8 @@ function createLooper(deps) {
         recStartAtCtx = startAt;
         recPendingStart = startAt > now + 0.001;
         overdubScratch = new Float32Array(cycleFrames);
+        overdubWrite = 0;
+        overdubStartPhase = phaseFrames(startAt);
         if (!recPendingStart) {
           recSamplesWritten = 0;
         }
