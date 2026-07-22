@@ -2,7 +2,7 @@
 
 **No Drama Drums** — portable C++/WASM tool to chop drum grooves and recreate synth kick / snare / hats
 
-> NoDruma breaks samples into chops and **regenerates** a clean synthetic drum sound clones
+> NoDruma breaks samples into chops and **regenerates** clean synthetic drum sound clones
 
 ### **WASM Webapp** features
 
