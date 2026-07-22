@@ -89,8 +89,10 @@ async function decodeAudioBuffer(arrayBuffer, label = "audio") {
 class PadPlayer {
   constructor() {
     this.ctx = null;
-    /** @type {GainNode|null} pad mix → destination (also tapped by looper) */
+    /** @type {GainNode|null} pad monitor → destination (what you hear) */
     this.padBus = null;
+    /** @type {GainNode|null} pad record tap — NEVER hears loops/click */
+    this.recordBus = null;
     this.buffers = new Map();
   }
 
@@ -104,7 +106,10 @@ class PadPlayer {
     return this.ctx;
   }
 
-  /** Shared pad mix bus — one GainNode into destination. */
+  /**
+   * Split monitor vs record so the looper can capture pads without any
+   * chance of loopBus / clickBus bleed (they never connect to recordBus).
+   */
   ensureGraph() {
     const ctx = this.ctx;
     if (!ctx) return null;
@@ -113,12 +118,23 @@ class PadPlayer {
       this.padBus.gain.value = 1;
       this.padBus.connect(ctx.destination);
     }
+    if (!this.recordBus) {
+      this.recordBus = ctx.createGain();
+      this.recordBus.gain.value = 1;
+      // Intentionally NOT connected to destination — looper taps this only.
+    }
     return this.padBus;
   }
 
   getPadBus() {
     this.ensureCtx();
     return this.padBus;
+  }
+
+  /** Clean pad-only bus for the looper recorder. */
+  getRecordBus() {
+    this.ensureCtx();
+    return this.recordBus;
   }
 
   getCtx() {
@@ -201,7 +217,9 @@ class PadPlayer {
     src.connect(low);
     low.connect(high);
     high.connect(gain);
+    // Fan-out: hear on padBus, capture on recordBus (loops/click never reach it)
     gain.connect(this.ensureGraph());
+    gain.connect(this.recordBus);
     src.start();
     return true;
   }

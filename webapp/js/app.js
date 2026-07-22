@@ -1069,6 +1069,7 @@
   const looper = createLooper({
     getCtx: () => player.getCtx(),
     getPadBus: () => player.getPadBus(),
+    getRecordBus: () => player.getRecordBus(),
     onChange: () => {
       syncLooperUi();
       ensureLooperAnim();

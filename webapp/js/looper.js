@@ -24,6 +24,7 @@ const LOOPER_SEAM_FADE = 64;
  * @param {{
  *   getCtx: () => AudioContext,
  *   getPadBus: () => GainNode,
+ *   getRecordBus?: () => GainNode,
  *   onChange?: () => void,
  * }} deps
  */
@@ -115,6 +116,9 @@ function createLooper(deps) {
   let recSamplesWritten = 0;
   /** @type {Float32Array|null} */
   let recScratch = null;
+  /** Clean overdub capture (cycle-phase domain) — mixed into tape only on commit. */
+  /** @type {Float32Array|null} */
+  let overdubScratch = null;
   let recIsFirst = false;
   let recStopAt = 0;
   let recPendingStop = false;
@@ -170,6 +174,18 @@ function createLooper(deps) {
       loopBus = ctx.createGain();
       loopBus.gain.value = 1;
       loopBus.connect(ctx.destination);
+    }
+    // Hard isolation: never alias the pad monitor/record buses
+    try {
+      const pad = deps.getPadBus?.();
+      const rec = deps.getRecordBus?.();
+      if (loopBus === pad || loopBus === rec) {
+        loopBus = ctx.createGain();
+        loopBus.gain.value = 1;
+        loopBus.connect(ctx.destination);
+      }
+    } catch {
+      /* */
     }
     if (!reverbNode) {
       reverbNode = ctx.createConvolver();
@@ -686,13 +702,17 @@ function createLooper(deps) {
   function ensureRecorder() {
     if (recorder) return;
     const ctx = deps.getCtx();
-    const padBus = deps.getPadBus();
+    // Pad-only record tap — loops and click never connect here
+    const recordBus =
+      typeof deps.getRecordBus === "function"
+        ? deps.getRecordBus()
+        : deps.getPadBus();
     ensureLoopBus();
 
     recorder = ctx.createScriptProcessor(LOOPER_PROC_SIZE, 1, 1);
     recorderSink = ctx.createGain();
     recorderSink.gain.value = 0;
-    padBus.connect(recorder);
+    recordBus.connect(recorder);
     recorder.connect(recorderSink);
     recorderSink.connect(ctx.destination);
 
@@ -701,6 +721,7 @@ function createLooper(deps) {
       ev.outputBuffer.getChannelData(0).fill(0);
       if (recTrack < 0) return;
       if (recIsFirst && !recScratch) return;
+      if (!recIsFirst && !overdubScratch) return;
 
       const n = input.length;
       // ScriptProcessor: buffer ends near currentTime; sample i at blockStart+i/sr
@@ -722,7 +743,9 @@ function createLooper(deps) {
           syncClickTransport();
         } else if (cycleFrames > 0) {
           recSamplesWritten = 0;
-          ensureTrackTape(recTrack);
+          if (!overdubScratch || overdubScratch.length !== cycleFrames) {
+            overdubScratch = new Float32Array(cycleFrames);
+          }
         }
         emit();
       }
@@ -746,21 +769,12 @@ function createLooper(deps) {
             break;
           }
         } else {
-          if (cycleFrames <= 0 || takeFrames <= 0) break;
+          if (cycleFrames <= 0 || !overdubScratch) break;
           // As-played lock: map capture time → shared cycle phase
           const tCap = blockStart + i / sampleRate + syncF / sampleRate;
-          let idx = phaseFrames(tCap);
-          const unshifted =
-            (idx + (t.shiftFrames || 0)) % cycleFrames;
-          const rs = t.regionStart | 0;
-          const re = t.regionEnd > rs ? t.regionEnd | 0 : takeFrames;
-          const regionLen = Math.max(1, re - rs);
-          const abs = rs + (unshifted % regionLen);
-          const tape = ensureTrackTape(recTrack);
-          if (tape && abs >= 0 && abs < tape.length) {
-            tape[abs] = clampSample(tape[abs] + v);
-          }
-          // Do not live-mix into pcm (avoids dry/wet flams); rebuild on finish
+          const idx = phaseFrames(tCap);
+          // Capture into isolated scratch only — never touch playing tape/pcm live
+          overdubScratch[idx] = clampSample(overdubScratch[idx] + v);
           recSamplesWritten++;
           if (recSamplesWritten >= cycleFrames) {
             finishRecording();
@@ -770,6 +784,32 @@ function createLooper(deps) {
       }
       if (t) t.peak = peak;
     };
+  }
+
+  /** Commit overdub scratch into the track tape (phrase domain), then rebuild. */
+  function commitOverdubToTape(idx) {
+    const t = tracks[idx];
+    if (!t || !overdubScratch || cycleFrames <= 0 || takeFrames <= 0) return;
+    const tape = ensureTrackTape(idx);
+    if (!tape) return;
+    if (!(t.regionEnd > t.regionStart)) {
+      t.regionStart = 0;
+      t.regionEnd = tape.length;
+    }
+    const rs = t.regionStart | 0;
+    const re = t.regionEnd > rs ? t.regionEnd | 0 : takeFrames;
+    const regionLen = Math.max(1, re - rs);
+    const shift = t.shiftFrames || 0;
+    for (let idxP = 0; idxP < cycleFrames; idxP++) {
+      const v = overdubScratch[idxP];
+      if (v === 0) continue;
+      const unshifted = (idxP + shift) % cycleFrames;
+      const abs = rs + (unshifted % regionLen);
+      if (abs >= 0 && abs < tape.length) {
+        tape[abs] = clampSample(tape[abs] + v);
+      }
+    }
+    overdubScratch = null;
   }
 
   function finishRecording() {
@@ -827,6 +867,7 @@ function createLooper(deps) {
       restartAllSources(ctx.currentTime);
       syncClickTransport();
     } else if (!recIsFirst) {
+      commitOverdubToTape(idx);
       if (t.tape && !(t.regionEnd > t.regionStart)) {
         t.regionStart = 0;
         t.regionEnd = t.tape.length;
@@ -848,6 +889,7 @@ function createLooper(deps) {
     recPendingStop = false;
     recPendingStart = false;
     recStopAt = 0;
+    overdubScratch = null;
     emit();
   }
 
@@ -856,6 +898,7 @@ function createLooper(deps) {
     tracks[recTrack].recording = false;
     tracks[recTrack].peak = 0;
     recScratch = null;
+    overdubScratch = null;
     recTrack = -1;
     recIsFirst = false;
     recPendingStop = false;
@@ -1260,6 +1303,7 @@ function createLooper(deps) {
         scheduleCountInClicks(plan.countStart);
         recStartAtCtx = plan.recStart;
         recPendingStart = true;
+        overdubScratch = new Float32Array(cycleFrames);
         if (!playing) {
           playing = true;
           restartAllSources(now);
@@ -1269,6 +1313,7 @@ function createLooper(deps) {
         const startAt = nextGridTime(now);
         recStartAtCtx = startAt;
         recPendingStart = startAt > now + 0.001;
+        overdubScratch = new Float32Array(cycleFrames);
         if (!recPendingStart) {
           recSamplesWritten = 0;
         }
@@ -1625,7 +1670,11 @@ function createLooper(deps) {
     stopClickScheduler();
     if (recorder) {
       try {
-        deps.getPadBus().disconnect(recorder);
+        const bus =
+          typeof deps.getRecordBus === "function"
+            ? deps.getRecordBus()
+            : deps.getPadBus();
+        bus.disconnect(recorder);
       } catch {
         /* */
       }
