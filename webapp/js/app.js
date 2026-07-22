@@ -830,6 +830,8 @@
   const selectLoopQuantize = document.getElementById("loop-quantize");
   const selectLoopBars = document.getElementById("loop-bars");
   const btnLoopClearAll = document.getElementById("loop-clear-all");
+  const btnLoopClick = document.getElementById("loop-click");
+  const inputLoopClickVol = document.getElementById("loop-click-vol");
   const loopCrop = document.getElementById("loop-crop");
   const loopCropWave = document.getElementById("loop-crop-wave");
   const loopCropSel = document.getElementById("loop-crop-sel");
@@ -1002,8 +1004,17 @@
     btnLoopRec.classList.toggle("recording", st.recording);
     btnLoopRec.classList.toggle("waiting", st.waitingStart || st.waitingStop);
     btnLoopPlay.textContent = st.playing ? "Playing" : "Play";
+    if (btnLoopClick) {
+      btnLoopClick.classList.toggle("on", !!st.clickEnabled);
+      btnLoopClick.setAttribute("aria-pressed", st.clickEnabled ? "true" : "false");
+    }
+    if (inputLoopClickVol && document.activeElement !== inputLoopClickVol) {
+      inputLoopClickVol.value = String(Math.round((st.clickVolume ?? 0.55) * 100));
+    }
 
-    if (st.waitingStart) {
+    if (st.countIn) {
+      loopStatus.textContent = "count-in…";
+    } else if (st.waitingStart) {
       loopStatus.textContent = "waiting for grid…";
     } else if (st.waitingStop) {
       loopStatus.textContent = "closing on grid…";
@@ -1273,6 +1284,17 @@
     looper.toggleRec();
   });
   btnLoopClearAll.addEventListener("click", () => looper.clearAll());
+  if (btnLoopClick) {
+    btnLoopClick.addEventListener("click", () => {
+      player.ensureCtx();
+      looper.toggleClick();
+    });
+  }
+  if (inputLoopClickVol) {
+    inputLoopClickVol.addEventListener("input", () => {
+      looper.setClickVolume((Number(inputLoopClickVol.value) || 0) / 100);
+    });
+  }
   inputLoopBpm.addEventListener("change", () => {
     looper.setBpm(inputLoopBpm.value);
     noteKitChanged();

@@ -133,7 +133,7 @@
         <h2>Looper</h2>
         <p class="col-sub">Stack pad takes · survives kit Reset</p>
       </div>
-      <p class="hint looper-hint">Rec open · Rec or Stop closes first take · trim cycle · then overdub (auto length)</p>
+      <p class="hint looper-hint">Click + Rec = 4-beat count-in (not recorded) · Rec/Stop closes first take · then overdub</p>
     </header>
 
     <div class="looper-transport" id="looper-transport">
@@ -161,6 +161,11 @@
           <option value="4">4</option>
           <option value="8">8</option>
         </select>
+      </label>
+      <button type="button" id="loop-click" class="btn ghost" title="Metronome (not recorded). With Rec: 4-beat count-in, then punch-in.">Click</button>
+      <label class="loop-field loop-click-vol" title="Click level">
+        <span>Click</span>
+        <input type="range" id="loop-click-vol" min="0" max="100" value="55" step="1" />
       </label>
       <button type="button" id="loop-clear-all" class="btn ghost danger">Clear all</button>
       <span id="loop-status" class="meta loop-status">empty</span>

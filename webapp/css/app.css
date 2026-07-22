@@ -813,6 +813,16 @@ body[data-screen="looper"] #btn-looper {
   color: var(--amber);
 }
 
+#loop-click.on {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+
+.loop-click-vol input[type="range"] {
+  width: 4.5rem;
+  accent-color: var(--mint);
+}
+
 .loop-track {
   cursor: pointer;
 }

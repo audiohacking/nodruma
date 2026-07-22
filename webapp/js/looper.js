@@ -16,6 +16,8 @@ const LOOPER_TRACKS = 8;
 const LOOPER_MAX_SEC = 30;
 const LOOPER_PROC_SIZE = 2048;
 const LOOPER_BEATS_PER_BAR = 4;
+/** Pre-roll clicks when Click is armed and Rec is pressed. */
+const LOOPER_COUNT_IN_BEATS = 4;
 const LOOPER_SEAM_FADE = 64;
 
 /**
@@ -119,6 +121,21 @@ function createLooper(deps) {
   let recPendingStart = false;
   let recStartAtCtx = 0;
 
+  /** Metronome — AudioContext-scheduled; never touches padBus (not recorded). */
+  let clickEnabled = false;
+  let clickVolume = 0.55;
+  /** @type {GainNode|null} */
+  let clickBus = null;
+  /** @type {AudioBuffer|null} */
+  let clickAccentBuf = null;
+  /** @type {AudioBuffer|null} */
+  let clickBeatBuf = null;
+  /** @type {ReturnType<typeof setInterval>|null} */
+  let clickTimerId = null;
+  let clickNextBeatIdx = 0;
+  const CLICK_LOOKAHEAD_SEC = 0.15;
+  const CLICK_SCHED_MS = 25;
+
   function emit() {
     deps.onChange?.();
   }
@@ -192,6 +209,182 @@ function createLooper(deps) {
   function setPhraseSnap(on) {
     phraseSnap = !!on;
     emit();
+  }
+
+  /** Click bus → destination only (never padBus / never recorded). */
+  function ensureClickBus() {
+    const ctx = deps.getCtx();
+    sampleRate = ctx.sampleRate || 44100;
+    if (!clickBus) {
+      clickBus = ctx.createGain();
+      clickBus.gain.value = clickVolume;
+      clickBus.connect(ctx.destination);
+    }
+    return clickBus;
+  }
+
+  function ensureClickBuffers() {
+    const ctx = deps.getCtx();
+    if (clickAccentBuf && clickBeatBuf) return;
+    clickAccentBuf = renderClickBuffer(ctx, 1240, 0.032, 0.9);
+    clickBeatBuf = renderClickBuffer(ctx, 880, 0.022, 0.55);
+  }
+
+  function renderClickBuffer(ctx, freqHz, durSec, amp) {
+    const n = Math.max(1, Math.floor(ctx.sampleRate * durSec));
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    const sr = ctx.sampleRate;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const env = Math.exp(-t * 55) * (1 - i / n);
+      d[i] = Math.sin(2 * Math.PI * freqHz * t) * env * amp;
+    }
+    return buf;
+  }
+
+  function fireClickAt(when, accent) {
+    const ctx = deps.getCtx();
+    ensureClickBus();
+    ensureClickBuffers();
+    if (when < ctx.currentTime - 0.002) return;
+    const src = ctx.createBufferSource();
+    src.buffer = accent ? clickAccentBuf : clickBeatBuf;
+    src.connect(clickBus);
+    try {
+      src.start(when);
+    } catch {
+      /* */
+    }
+  }
+
+  function realignClickBeats() {
+    try {
+      const ctx = deps.getCtx();
+      const origin = cycleOrigin;
+      if (!(origin > 0) || !playing) {
+        clickNextBeatIdx = 0;
+        return;
+      }
+      const beat = beatSec();
+      if (beat <= 0) return;
+      const now = ctx.currentTime;
+      // Schedule from the next beat at or after now (tight to shared clock)
+      clickNextBeatIdx = Math.max(0, Math.ceil((now - origin) / beat - 1e-12));
+    } catch {
+      clickNextBeatIdx = 0;
+    }
+  }
+
+  function clickScheduleAhead() {
+    if (!clickEnabled || !playing) return;
+    let ctx;
+    try {
+      ctx = deps.getCtx();
+    } catch {
+      return;
+    }
+    const origin = cycleOrigin;
+    if (!(origin > 0)) return;
+    const beat = beatSec();
+    if (beat <= 0) return;
+    const horizon = ctx.currentTime + CLICK_LOOKAHEAD_SEC;
+    // Cap iterations so a huge tempo jump can't spin
+    for (let guard = 0; guard < 64; guard++) {
+      const t = origin + clickNextBeatIdx * beat;
+      if (t > horizon) break;
+      if (t >= ctx.currentTime - 0.001) {
+        const accent = clickNextBeatIdx % LOOPER_BEATS_PER_BAR === 0;
+        fireClickAt(t, accent);
+      }
+      clickNextBeatIdx++;
+    }
+  }
+
+  function startClickScheduler() {
+    if (!clickEnabled || !playing) return;
+    ensureClickBus();
+    ensureClickBuffers();
+    realignClickBeats();
+    if (clickTimerId == null) {
+      clickTimerId = setInterval(clickScheduleAhead, CLICK_SCHED_MS);
+    }
+    clickScheduleAhead();
+  }
+
+  function stopClickScheduler() {
+    if (clickTimerId != null) {
+      clearInterval(clickTimerId);
+      clickTimerId = null;
+    }
+  }
+
+  /** Call whenever playing / cycleOrigin / bpm / click enable changes. */
+  function syncClickTransport() {
+    if (clickEnabled && playing && cycleOrigin > 0) startClickScheduler();
+    else stopClickScheduler();
+  }
+
+  function setClickEnabled(on) {
+    clickEnabled = !!on;
+    if (clickEnabled) {
+      ensureClickBus();
+      ensureClickBuffers();
+    }
+    syncClickTransport();
+    emit();
+  }
+
+  function toggleClick() {
+    setClickEnabled(!clickEnabled);
+  }
+
+  function setClickVolume(v) {
+    clickVolume = Math.max(0, Math.min(1, Number(v) || 0));
+    if (clickBus) clickBus.gain.value = clickVolume;
+    emit();
+  }
+
+  /**
+   * Schedule exactly N count-in clicks ending before punch-in.
+   * Record starts on the following downbeat (scheduler continues from there).
+   */
+  function scheduleCountInClicks(countStart) {
+    const beat = beatSec();
+    if (!(beat > 0) || !clickEnabled) return;
+    ensureClickBus();
+    ensureClickBuffers();
+    for (let i = 0; i < LOOPER_COUNT_IN_BEATS; i++) {
+      fireClickAt(countStart + i * beat, i === 0);
+    }
+  }
+
+  /**
+   * When Click is on: 4-beat pre-roll, then punch-in.
+   * First take → punch becomes cycleOrigin. Overdub → next bar of the loop.
+   */
+  function planCountInPunch(now, isFirst) {
+    const beat = beatSec();
+    const lead = 0.04; // tiny schedule lead so click 1 isn't late
+    if (isFirst) {
+      const countStart = now + lead;
+      return {
+        countStart,
+        recStart: countStart + LOOPER_COUNT_IN_BEATS * beat,
+      };
+    }
+    // Overdub: land on a bar line of the existing clock, with a full bar of lead
+    const bar = barSec();
+    let punch =
+      cycleOrigin +
+      Math.ceil((now - cycleOrigin) / bar - 1e-9) * bar;
+    if (punch <= now + 0.01) punch += bar;
+    const need = LOOPER_COUNT_IN_BEATS * beat;
+    while (punch - now < need - 0.005) punch += bar;
+    return {
+      countStart: punch - need,
+      recStart: punch,
+    };
   }
 
   function quantizeStepSec() {
@@ -473,6 +666,7 @@ function createLooper(deps) {
       cycleOrigin = now - ph * (cycleFrames / sampleRate);
       restartAllSources(now);
     }
+    syncClickTransport();
     emit();
   }
 
@@ -525,6 +719,7 @@ function createLooper(deps) {
         if (recIsFirst) {
           cycleOrigin = recStartAtCtx;
           recWrite = 0;
+          syncClickTransport();
         } else if (cycleFrames > 0) {
           recSamplesWritten = 0;
           ensureTrackTape(recTrack);
@@ -630,6 +825,7 @@ function createLooper(deps) {
       const ctx = deps.getCtx();
       cycleOrigin = ctx.currentTime;
       restartAllSources(ctx.currentTime);
+      syncClickTransport();
     } else if (!recIsFirst) {
       if (t.tape && !(t.regionEnd > t.regionStart)) {
         t.regionStart = 0;
@@ -643,6 +839,7 @@ function createLooper(deps) {
         const ph = phase01(now);
         cycleOrigin = now - ph * (cycleFrames / sampleRate);
         restartAllSources(now);
+        syncClickTransport();
       }
     }
 
@@ -722,6 +919,7 @@ function createLooper(deps) {
       playing = false;
       cycleOrigin = 0;
       stopTrackSources();
+      syncClickTransport();
     }
     emit();
   }
@@ -729,6 +927,7 @@ function createLooper(deps) {
   function clearAll() {
     cancelRecording();
     stopTrackSources();
+    stopClickScheduler();
     for (const t of tracks) {
       t.tape = null;
       t.pcm = null;
@@ -750,6 +949,7 @@ function createLooper(deps) {
     playing = false;
     cycleOrigin = 0;
     selectedTrack = 0;
+    syncClickTransport();
     emit();
   }
 
@@ -765,13 +965,26 @@ function createLooper(deps) {
       cycleOrigin = ctx.currentTime;
     }
     restartAllSources(ctx.currentTime);
+    syncClickTransport();
     emit();
   }
 
   function stop() {
-    if (recTrack >= 0) finishRecording();
+    if (recTrack >= 0) {
+      if (recPendingStart) {
+        const wasFirst = recIsFirst;
+        cancelRecording();
+        if (wasFirst && takeFrames <= 0) {
+          cycleOrigin = 0;
+          stopTrackSources();
+        }
+      } else {
+        finishRecording();
+      }
+    }
     playing = false;
     stopTrackSources();
+    syncClickTransport();
     emit();
   }
 
@@ -871,6 +1084,7 @@ function createLooper(deps) {
       cycleOrigin = now - ph * (cycleFrames / sampleRate);
       restartAllSources(now);
     }
+    syncClickTransport();
     emit();
     return true;
   }
@@ -1017,25 +1231,52 @@ function createLooper(deps) {
         barsPreset > 0
           ? Math.min(cap, Math.round(barsPreset * barSec() * sampleRate))
           : 0;
-      cycleOrigin = now;
-      recStartAtCtx = now;
-      recPendingStart = false;
-      playing = true;
+
+      if (clickEnabled) {
+        const plan = planCountInPunch(now, true);
+        scheduleCountInClicks(plan.countStart);
+        // Clock locks to the downbeat after count-in (as-played start)
+        cycleOrigin = plan.recStart;
+        recStartAtCtx = plan.recStart;
+        recPendingStart = true;
+        playing = true;
+        syncClickTransport();
+      } else {
+        cycleOrigin = now;
+        recStartAtCtx = now;
+        recPendingStart = false;
+        playing = true;
+        syncClickTransport();
+      }
     } else {
       ensureTrackTape(idx);
       if (!(tracks[idx].regionEnd > tracks[idx].regionStart)) {
         tracks[idx].regionStart = 0;
         tracks[idx].regionEnd = takeFrames;
       }
-      const startAt = nextGridTime(now);
-      recStartAtCtx = startAt;
-      recPendingStart = startAt > now + 0.001;
-      if (!recPendingStart) {
-        recSamplesWritten = 0;
-      }
-      if (!playing) {
-        playing = true;
-        restartAllSources(now);
+
+      if (clickEnabled) {
+        const plan = planCountInPunch(now, false);
+        scheduleCountInClicks(plan.countStart);
+        recStartAtCtx = plan.recStart;
+        recPendingStart = true;
+        if (!playing) {
+          playing = true;
+          restartAllSources(now);
+        }
+        syncClickTransport();
+      } else {
+        const startAt = nextGridTime(now);
+        recStartAtCtx = startAt;
+        recPendingStart = startAt > now + 0.001;
+        if (!recPendingStart) {
+          recSamplesWritten = 0;
+        }
+        if (!playing) {
+          playing = true;
+          restartAllSources(now);
+        }
+        syncClickTransport();
       }
     }
     emit();
@@ -1043,6 +1284,19 @@ function createLooper(deps) {
 
   function requestStopRec() {
     if (recTrack < 0) return;
+    // Abort count-in / grid wait without writing a take
+    if (recPendingStart) {
+      const wasFirst = recIsFirst;
+      cancelRecording();
+      if (wasFirst && takeFrames <= 0) {
+        playing = false;
+        cycleOrigin = 0;
+        stopTrackSources();
+      }
+      syncClickTransport();
+      emit();
+      return;
+    }
     if (recIsFirst) {
       if (quantize === "off" && barsPreset === 0) {
         finishRecording();
@@ -1068,6 +1322,8 @@ function createLooper(deps) {
 
   function setBpm(v) {
     bpm = Math.max(40, Math.min(240, Math.round(Number(v) || 120)));
+    if (clickEnabled && playing) realignClickBeats();
+    syncClickTransport();
     emit();
   }
 
@@ -1142,8 +1398,11 @@ function createLooper(deps) {
       sampleRate,
       phraseSnap,
       syncOffsetMs,
+      clickEnabled,
+      clickVolume,
       recording: recTrack >= 0,
       waitingStart: recPendingStart,
+      countIn: !!(recPendingStart && clickEnabled && recTrack >= 0),
       waitingStop: recPendingStop,
       recTrack,
       selectedTrack,
@@ -1201,6 +1460,8 @@ function createLooper(deps) {
       selectedTrack,
       phraseSnap,
       syncOffsetMs,
+      clickEnabled,
+      clickVolume,
       tracks: tracks.map((t) => ({
         muted: !!t.muted,
         armed: !!t.armed,
@@ -1277,6 +1538,11 @@ function createLooper(deps) {
     if (snap.syncOffsetMs != null) {
       syncOffsetMs = Math.max(-80, Math.min(80, Number(snap.syncOffsetMs) || 0));
     }
+    if (typeof snap.clickEnabled === "boolean") clickEnabled = snap.clickEnabled;
+    if (snap.clickVolume != null) {
+      clickVolume = Math.max(0, Math.min(1, Number(snap.clickVolume) || 0));
+      if (clickBus) clickBus.gain.value = clickVolume;
+    }
 
     const list = snap.tracks || [];
     let maxTake = 0;
@@ -1349,12 +1615,14 @@ function createLooper(deps) {
       rebuildAllPcm();
     }
     if (!tracks.some((t) => t.armed)) tracks[0].armed = true;
+    syncClickTransport();
     emit();
   }
 
   function dispose() {
     cancelRecording();
     stopTrackSources();
+    stopClickScheduler();
     if (recorder) {
       try {
         deps.getPadBus().disconnect(recorder);
@@ -1376,6 +1644,14 @@ function createLooper(deps) {
         /* */
       }
       recorderSink = null;
+    }
+    if (clickBus) {
+      try {
+        clickBus.disconnect();
+      } catch {
+        /* */
+      }
+      clickBus = null;
     }
   }
 
@@ -1412,6 +1688,9 @@ function createLooper(deps) {
     setTrackFx,
     setSyncOffsetMs,
     setPhraseSnap,
+    setClickEnabled,
+    toggleClick,
+    setClickVolume,
     setUiVisible() {},
     exportSnapshot,
     importSnapshot,
